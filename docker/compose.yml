@@ -1,0 +1,20 @@
+services:
+  codex:
+    image: php:8.2-apache
+    ports:
+      - "8090:80"
+    volumes:
+      - ./public:/var/www/html/public:ro
+      - ./public/assets:/var/www/html/public/assets
+      - ./src:/var/www/html/src:ro
+      - ./data:/var/www/html/data
+      - ./docker/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
+      - ./docker/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+    command: >
+      bash -c "
+        chown -R www-data:www-data /var/www/html/data /var/www/html/public/assets &&
+        chmod -R a+rwX /var/www/html/data /var/www/html/public/assets &&
+        a2enmod rewrite headers &&
+        apache2-foreground
+      "
+    restart: unless-stopped
