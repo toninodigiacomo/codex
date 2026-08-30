@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
 Auth::bootSession();
-Auth::requireLogin();
+Auth::requireReaderPage();
 ?>
 <!DOCTYPE html>
 <html lang="fr">

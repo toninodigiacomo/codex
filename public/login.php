@@ -11,7 +11,7 @@ if (!Auth::isSetupComplete()) {
     exit;
 }
 if (Auth::isLoggedIn()) {
-    header('Location: /library.php');
+    header('Location: ' . (Auth::isAdmin() ? '/admin.php' : '/library.php'));
     exit;
 }
 
@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $result = Auth::attemptLogin($username, $password, $code, $remember);
         if ($result === 'ok') {
-            header('Location: /library.php');
+            header('Location: ' . (Auth::isAdmin() ? '/admin.php' : '/library.php'));
             exit;
         }
         if ($result === 'mfa_setup_required') {
@@ -79,6 +79,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   .field-stack { display: flex; flex-direction: column; gap: 12px; }
   .remember-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .remember-row input { width: auto; }
+  .password-field { position: relative; }
+  .password-field .input { padding-right: 42px; }
+  .password-toggle {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; font-size: 16px;
+    padding: 6px 8px; line-height: 1; opacity: 0.6;
+  }
+  .password-toggle:hover { opacity: 1; }
   .error-box { background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface)); color: #ff8a8a; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
   .success-box { background: color-mix(in srgb, #2fbf71 18%, var(--color-surface)); color: #7be3ab; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
 </style>
@@ -124,7 +132,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
         <div class="field">
           <label for="password">Mot de passe</label>
-          <input class="input" id="password" name="password" type="password" required autocomplete="current-password" />
+          <div class="password-field">
+            <input class="input" id="password" name="password" type="password" required autocomplete="current-password" />
+            <button type="button" class="password-toggle" id="passwordToggle" aria-label="Afficher le mot de passe">👁</button>
+          </div>
         </div>
         <div class="field">
           <label for="totp_code">Code à 6 chiffres (si l'authentification à deux facteurs est activée)</label>
@@ -139,6 +150,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
   </div>
 </div>
+
+<script>
+  document.getElementById('passwordToggle').addEventListener('click', function () {
+    var field = document.getElementById('password');
+    var showing = field.type === 'text';
+    field.type = showing ? 'password' : 'text';
+    this.textContent = showing ? '👁' : '🙈';
+    this.setAttribute('aria-label', showing ? 'Afficher le mot de passe' : 'Masquer le mot de passe');
+  });
+</script>
 
 </body>
 </html>

@@ -271,6 +271,38 @@ send mail directly to begin with, ISPs block outbound port 25). Point it
 at whatever SMTP relay you already have — Gmail, your email provider,
 etc. — via the Réglages tab.
 
+## Role separation: admins don't browse
+
+Admin accounts are for administering, not reading. `Auth::requireReaderPage()`
+(used by `library.php`/`item.php`) and `Auth::requireReaderApi()` (used by
+`/api/items`, `/api/tags`, `/api/series`) both redirect/reject an admin
+just like they would a logged-out visitor, sending them to `/admin.php`
+instead. Post-login redirects (`login.php`, `index.php`, `mfa-setup.php`)
+are role-aware too — an admin lands on `/admin.php`, a reader on
+`/library.php`. `/api/libraries` stays open to both roles: the admin
+console's own Libraries/Users tabs and the reader-facing sidebar both need
+it.
+
+**Known gap this creates**: item metadata editing and ComicRack/cover
+extraction currently only exist on `item.php` — which is now unreachable
+for admins. There's no dedicated admin screen for managing item content
+yet. Worth building next if that's needed day-to-day.
+
+## Schema migrations
+
+`CREATE TABLE IF NOT EXISTS` (in `schema.sql`) only matters for a table
+that doesn't exist yet — it never touches one that's already there, so
+adding a column to an existing table in a later revision silently does
+nothing for anyone who already has a database, until `Database::migrate()`
+runs. It's a short, explicit list of "table → column → definition"
+(`Database::COLUMN_MIGRATIONS`), checked against `PRAGMA table_info()` on
+every boot and applied via `ALTER TABLE ... ADD COLUMN` for whatever's
+missing — safe to run every time (skips columns that already exist) and
+safe on a brand-new database (nothing to add). Existing rows are
+backfilled through each column's own `DEFAULT` — `status` defaults to
+`'active'` specifically because a `users` row that predates the column
+must already be a real, active account, not a pending invite.
+
 ## Local hosting
 
 ```bash

@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $code = (string) ($_POST['totp_code'] ?? '');
     if (Auth::completeForcedMfaEnrollment($secret, $code)) {
         unset($_SESSION['forced_mfa_secret_' . $userId]);
-        header('Location: /library.php');
+        header('Location: ' . (Auth::isAdmin() ? '/admin.php' : '/library.php'));
         exit;
     }
     $error = "Code invalide. Vérifie l'heure de ton téléphone et réessaie.";

@@ -77,6 +77,8 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
   .qr-holder { background: #fff; padding: 16px; border-radius: var(--radius-md); display: inline-block; margin-bottom: 6px; }
   .qr-holder svg { display: block; width: 170px; height: 170px; }
   .manual-key summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--color-accent); margin: 6px 0; }
+  .show-pw-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .show-pw-toggle input { width: auto; }
   .error-box { background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface)); color: #ff8a8a; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
 </style>
 </head>
@@ -100,6 +102,9 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
         <label for="password_confirm">Confirmer le mot de passe</label>
         <input class="input" type="password" id="password_confirm" name="password_confirm" required minlength="12" autocomplete="new-password" />
       </div>
+      <label class="show-pw-toggle">
+        <input type="checkbox" id="showPasswords" /> Afficher les mots de passe
+      </label>
 
       <?php if ($invitedUser['mfa_required']): ?>
         <p class="text-muted" style="font-size:13px;font-weight:600;">L'administrateur exige l'authentification à deux facteurs pour ce compte.</p>
@@ -150,6 +155,12 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
     section.style.display = 'block';
     codeInput.required = true;
   }
+
+  document.getElementById('showPasswords').addEventListener('change', function () {
+    var type = this.checked ? 'text' : 'password';
+    document.getElementById('password').type = type;
+    document.getElementById('password_confirm').type = type;
+  });
 </script>
 
 </body>

@@ -92,6 +92,20 @@ final class Auth
         }
     }
 
+    /**
+     * For the reader-facing pages (library, item detail): admins don't
+     * browse the collection, they administer it — send them to the admin
+     * console instead of the catalog rather than letting them in.
+     */
+    public static function requireReaderPage(): void
+    {
+        self::requireLogin();
+        if (self::isAdmin()) {
+            header('Location: /admin.php');
+            exit;
+        }
+    }
+
     public static function isAdmin(): bool
     {
         return self::isLoggedIn() && ($_SESSION['role'] ?? null) === 'admin';
@@ -137,6 +151,18 @@ final class Auth
             http_response_code(401);
             header('Content-Type: application/json');
             echo json_encode(['error' => 'Authentification requise']);
+            exit;
+        }
+    }
+
+    /** Same split as requireReaderPage(), for the /api/items|tags|series endpoints. */
+    public static function requireReaderApi(): void
+    {
+        self::requireLoginApi();
+        if (self::isAdmin()) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => "Les comptes administrateurs n'accèdent pas au catalogue — utilise un compte lecteur"]);
             exit;
         }
     }

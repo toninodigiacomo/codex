@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
 Auth::bootSession();
-Auth::requireLogin();
+Auth::requireReaderPage();
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -27,9 +27,7 @@ Auth::requireLogin();
       <label class="seg-opt"><input type="radio" name="type" value="ebook" /><span>Ebooks</span></label>
       <label class="seg-opt"><input type="radio" name="type" value="magazine" /><span>Magazines</span></label>
     </div>
-    <?php if (Auth::isAdmin()): ?>
-      <a href="admin.php" class="btn btn-ghost">Administration</a>
-    <?php endif; ?>
+    <?php // admins never reach this page — see Auth::requireReaderPage() ?>
     <a href="logout.php" class="btn btn-ghost" title="Déconnexion (<?= htmlspecialchars($_SESSION['username'] ?? '') ?>)">Déconnexion</a>
   </nav>
 

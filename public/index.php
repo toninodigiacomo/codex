@@ -11,7 +11,7 @@ if (!Auth::isSetupComplete()) {
     exit;
 }
 if (Auth::isLoggedIn()) {
-    header('Location: /library.php');
+    header('Location: ' . (Auth::isAdmin() ? '/admin.php' : '/library.php'));
     exit;
 }
 header('Location: /login.php');

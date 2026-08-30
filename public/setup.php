@@ -72,6 +72,8 @@ $uri = Totp::provisioningUri($secret, 'admin', $issuer);
   .qr-holder svg { display: block; width: 180px; height: 180px; }
   .manual-key { margin-top: 12px; }
   .manual-key summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--color-accent); margin-bottom: 8px; }
+  .show-pw-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: -4px; }
+  .show-pw-toggle input { width: auto; }
   .field-stack { display: flex; flex-direction: column; gap: 14px; }
   .error-box { background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface)); color: #ff8a8a; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
 </style>
@@ -120,6 +122,9 @@ $uri = Totp::provisioningUri($secret, 'admin', $issuer);
         <label for="password_confirm">Confirmer le mot de passe</label>
         <input class="input" type="password" id="password_confirm" name="password_confirm" required minlength="12" autocomplete="new-password" />
       </div>
+      <label class="show-pw-toggle">
+        <input type="checkbox" id="showPasswords" /> Afficher les mots de passe
+      </label>
       <div class="field">
         <label for="totp_code">Code à 6 chiffres de l'application</label>
         <input class="input" type="text" id="totp_code" name="totp_code" required pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" />
@@ -135,6 +140,12 @@ $uri = Totp::provisioningUri($secret, 'admin', $issuer);
   qr.addData(<?= json_encode($uri) ?>);
   qr.make();
   document.getElementById('qrHolder').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 });
+
+  document.getElementById('showPasswords').addEventListener('change', function () {
+    var type = this.checked ? 'text' : 'password';
+    document.getElementById('password').type = type;
+    document.getElementById('password_confirm').type = type;
+  });
 </script>
 
 </body>

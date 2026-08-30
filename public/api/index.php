@@ -116,6 +116,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 try {
     switch ($resource) {
         case 'items':
+            Auth::requireReaderApi();
             if ($method === 'POST' && $id !== null && $action === 'extract-metadata') {
                 $item = Items::find($id);
                 if (!$item) {
@@ -249,6 +250,7 @@ try {
             respond(405, ['error' => 'Méthode non autorisée']);
 
         case 'series':
+            Auth::requireReaderApi();
             if ($method === 'GET' && $id === null) {
                 respond(200, Series::all());
             }
@@ -278,6 +280,7 @@ try {
             respond(405, ['error' => 'Méthode non autorisée']);
 
         case 'tags':
+            Auth::requireReaderApi();
             if ($method === 'GET' && $id === null) {
                 respond(200, Tags::all());
             }
