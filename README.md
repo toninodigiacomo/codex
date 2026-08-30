@@ -183,6 +183,39 @@ page to an image needs something PHP has no built-in support for at all
 above. Same story as CBR: worth adding once it's actually needed, not
 before.
 
+## Authentication
+
+Codex is a private personal library, not a public site with an admin
+section bolted on — **every page and every API call requires a logged-in
+session**, not just writes.
+
+### First run — `/setup.php`
+
+Redirected here automatically as long as `users` is empty. Generates a
+random TOTP secret, shows it as a real **scannable QR code** (rendered
+client-side by a vendored MIT library, `public/vendor/qrcode.js` — the
+secret never leaves your server), asks for a username + password (12
+characters minimum), and verifies the first 6-digit code before creating
+the account (role `admin`, stored in `users`).
+
+### Every other visit — `/login.php`
+
+Username + password + 6-digit code together, plus an optional **"Se
+souvenir de moi pendant 3 mois"** checkbox (a separate long-lived
+`codex_remember` cookie — only its SHA-256 hash is stored, in `users`,
+and it rotates on every silent re-login). Failed attempts are tracked per
+IP in the `login_attempts` table; 5 failures locks that IP out for 15
+minutes. Sessions use `HttpOnly`/`SameSite=Strict` cookies, a 1-hour idle
+timeout, and session ID regeneration on login — same approach as My Lost
+Treasure's admin, just backed by SQLite instead of a JSON file this time,
+since `users` was already part of the schema.
+
+`/library.php` and `/item.php` both call `Auth::requireLogin()`; the
+`/api/*` front controller calls `Auth::requireLoginApi()` for every
+request, reads included — the browser's session cookie is sent
+automatically, so `library.js`/`item.js` needed no changes to work
+against the now-protected API.
+
 ## Local hosting
 
 ```bash

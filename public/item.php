@@ -1,3 +1,9 @@
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/../src/Auth.php';
+Auth::bootSession();
+Auth::requireLogin();
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -12,8 +18,8 @@
 
 <div class="app-shell">
   <nav class="nav topbar">
-    <a href="library.html" class="nav-brand" style="text-decoration:none;">Codex</a>
-    <a href="library.html" class="btn btn-ghost">&larr; Bibliothèque</a>
+    <a href="library.php" class="nav-brand" style="text-decoration:none;">Codex</a>
+    <a href="library.php" class="btn btn-ghost">&larr; Bibliothèque</a>
   </nav>
 
   <main class="item-page" id="itemPage">

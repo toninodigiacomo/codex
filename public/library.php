@@ -1,3 +1,9 @@
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/../src/Auth.php';
+Auth::bootSession();
+Auth::requireLogin();
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -21,6 +27,7 @@
       <label class="seg-opt"><input type="radio" name="type" value="ebook" /><span>Ebooks</span></label>
       <label class="seg-opt"><input type="radio" name="type" value="magazine" /><span>Magazines</span></label>
     </div>
+    <a href="logout.php" class="btn btn-ghost" title="Déconnexion (<?= htmlspecialchars($_SESSION['username'] ?? '') ?>)">Déconnexion</a>
   </nav>
 
   <div class="app-body">

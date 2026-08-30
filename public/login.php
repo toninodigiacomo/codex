@@ -1,3 +1,41 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../src/Auth.php';
+
+Auth::bootSession();
+
+if (!Auth::isSetupComplete()) {
+    header('Location: /setup.php');
+    exit;
+}
+if (Auth::isLoggedIn()) {
+    header('Location: /library.php');
+    exit;
+}
+
+$error = null;
+$justSetUp = isset($_GET['setup']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (Auth::isLockedOut()) {
+        $wait = (int) ceil(Auth::secondsUntilUnlock() / 60);
+        $error = "Trop de tentatives échouées. Réessaie dans environ {$wait} minute(s).";
+    } else {
+        $username = trim((string) ($_POST['username'] ?? ''));
+        $password = (string) ($_POST['password'] ?? '');
+        $code = (string) ($_POST['totp_code'] ?? '');
+        $remember = isset($_POST['remember']);
+
+        if (Auth::attemptLogin($username, $password, $code, $remember)) {
+            header('Location: /library.php');
+            exit;
+        }
+        $error = "Nom d'utilisateur, mot de passe ou code invalide.";
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -33,9 +71,10 @@
   .form-wrap h2 { margin: 0 0 6px; }
   .form-wrap .lead { font-size: 13.5px; margin-bottom: 20px; }
   .field-stack { display: flex; flex-direction: column; gap: 12px; }
-
-  .demo-note { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--color-divider); }
-  .demo-note .lbl { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 9px; }
+  .remember-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .remember-row input { width: auto; }
+  .error-box { background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface)); color: #ff8a8a; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
+  .success-box { background: color-mix(in srgb, #2fbf71 18%, var(--color-surface)); color: #7be3ab; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -51,7 +90,7 @@
       <p>BD, ebooks, magazines et scans — indexés depuis mes propres disques, lisibles depuis n'importe quel navigateur.</p>
     </div>
     <div class="spec-row">
-      <div><div class="k">Formats</div><div class="v">CBZ · CBR · EPUB · PDF</div></div>
+      <div><div class="k">Formats</div><div class="v">CBZ · EPUB · PDF</div></div>
       <div><div class="k">Bibliothèque</div><div class="v">Personnelle</div></div>
       <div><div class="k">Hébergement</div><div class="v">Local</div></div>
     </div>
@@ -63,22 +102,32 @@
       <h2>Se connecter</h2>
       <p class="text-muted lead">Utilise le compte que l'administrateur t'a créé.</p>
 
+      <?php if ($justSetUp && !$error): ?>
+        <div class="success-box">Compte créé. Connecte-toi avec ton mot de passe et un code de ton application.</div>
+      <?php endif; ?>
+      <?php if ($error): ?>
+        <div class="error-box"><?= htmlspecialchars($error) ?></div>
+      <?php endif; ?>
+
       <form class="field-stack" method="post">
         <div class="field">
           <label for="username">Nom d'utilisateur</label>
-          <input class="input" id="username" name="username" autofocus />
+          <input class="input" id="username" name="username" required autofocus />
         </div>
         <div class="field">
           <label for="password">Mot de passe</label>
-          <input class="input" id="password" name="password" type="password" />
+          <input class="input" id="password" name="password" type="password" required autocomplete="current-password" />
         </div>
+        <div class="field">
+          <label for="totp_code">Code à 6 chiffres</label>
+          <input class="input" id="totp_code" name="totp_code" required pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" />
+        </div>
+        <label class="remember-row">
+          <input type="checkbox" id="remember" name="remember" />
+          Se souvenir de moi pendant 3 mois
+        </label>
         <button type="submit" class="btn btn-primary btn-block">Continuer</button>
       </form>
-
-      <div class="demo-note">
-        <div class="lbl">À propos</div>
-        <p class="text-muted" style="font-size:12.5px;margin:0;">Codex est une archive personnelle — les couvertures, formats et contenus s'affichent une fois la bibliothèque connectée.</p>
-      </div>
     </div>
   </div>
 </div>

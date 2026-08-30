@@ -129,7 +129,7 @@
     grid.innerHTML = items
       .map(
         (item) => `
-      <a class="item-card" href="item.html?id=${esc(item.id)}">
+      <a class="item-card" href="item.php?id=${esc(item.id)}">
         <div class="item-cover">
           <span class="type-chip">${esc(TYPE_LABELS[item.type] || item.type)}</span>
           ${coverMarkup(item)}

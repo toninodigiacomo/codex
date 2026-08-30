@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/Database.php';
+require_once __DIR__ . '/../../src/Auth.php';
 require_once __DIR__ . '/../../src/Items.php';
 require_once __DIR__ . '/../../src/Tags.php';
 require_once __DIR__ . '/../../src/Series.php';
@@ -14,6 +15,13 @@ require_once __DIR__ . '/../../src/Thumbnails.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+
+// Codex is a private personal library, not a public site with an admin
+// section bolted on — every API call (reads included) requires a logged-in
+// session, sent automatically by the browser via the session cookie once
+// signed in through login.php.
+Auth::bootSession();
+Auth::requireLoginApi();
 
 function respond(int $code, $data): void
 {

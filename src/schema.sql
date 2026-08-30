@@ -84,12 +84,20 @@ CREATE TABLE IF NOT EXISTS item_tags (
 CREATE INDEX IF NOT EXISTS idx_item_tags_tag_id ON item_tags(tag_id);
 
 CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY,
-  username      TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'reader' CHECK (role IN ('admin', 'reader')),
-  totp_secret   TEXT,
-  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  id                     INTEGER PRIMARY KEY,
+  username               TEXT NOT NULL UNIQUE,
+  password_hash          TEXT NOT NULL,
+  role                   TEXT NOT NULL DEFAULT 'reader' CHECK (role IN ('admin', 'reader')),
+  totp_secret            TEXT,
+  remember_token_hash    TEXT,
+  remember_token_expires TEXT,
+  created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  ip         TEXT PRIMARY KEY,
+  count      INTEGER NOT NULL DEFAULT 0,
+  last_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS reading_progress (

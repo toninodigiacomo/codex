@@ -1,5 +1,7 @@
 RewriteEngine On
 
+DirectoryIndex index.php index.html
+
 # Route every /api/... request through the front controller, EXCEPT
 # requests for a physically existing file, which Apache serves directly.
 RewriteCond %{REQUEST_URI} ^/api/
