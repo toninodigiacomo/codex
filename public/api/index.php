@@ -9,6 +9,8 @@ require_once __DIR__ . '/../../src/Series.php';
 require_once __DIR__ . '/../../src/Libraries.php';
 require_once __DIR__ . '/../../src/Paths.php';
 require_once __DIR__ . '/../../src/ComicInfo.php';
+require_once __DIR__ . '/../../src/CoverExtractor.php';
+require_once __DIR__ . '/../../src/Thumbnails.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -25,6 +27,30 @@ function bodyJson(): array
     $raw = file_get_contents('php://input');
     $data = json_decode((string) $raw, true);
     return is_array($data) ? $data : [];
+}
+
+/**
+ * Extracts and saves a cover thumbnail for the given item, updating
+ * cover_path in the DB. Returns the web-relative cover path on success,
+ * null if no source image could be found (or GD is unavailable).
+ */
+function extractAndSaveCover(array $item): ?string
+{
+    if (!Thumbnails::available()) {
+        return null;
+    }
+    $absPath = Paths::resolve($item['path']);
+    $found = CoverExtractor::forItem($absPath, $item['type']);
+    if ($found === null) {
+        return null;
+    }
+    $publicDir = realpath(__DIR__ . '/..');
+    $relPath = 'assets/covers/' . $item['id'] . '.jpg';
+    if (!Thumbnails::saveResized($found['data'], $publicDir . '/' . $relPath)) {
+        return null;
+    }
+    Items::update($item['id'], ['cover_path' => $relPath]);
+    return $relPath;
 }
 
 /** Resolve an array of tag names (creating any that don't exist yet) to their ids. */
@@ -71,17 +97,40 @@ try {
                 }
                 $absPath = Paths::resolve($item['path']);
                 $meta = ComicInfo::read($absPath);
-                if ($meta === null) {
-                    respond(200, ['extracted' => false, 'item' => $item]);
+                $metaFound = $meta !== null;
+                if ($meta !== null) {
+                    if (!empty($meta['series_name'])) {
+                        $meta['series_id'] = Series::findOrCreate($meta['series_name']);
+                    }
+                    unset($meta['series_name']);
+                    if ($meta) {
+                        Items::update($id, $meta);
+                    }
                 }
-                if (!empty($meta['series_name'])) {
-                    $meta['series_id'] = Series::findOrCreate($meta['series_name']);
+                // Cover extraction (first page) is independent of ComicInfo.xml
+                // being present — try it either way.
+                $coverPath = extractAndSaveCover(Items::find($id));
+                respond(200, [
+                    'extracted' => $metaFound,
+                    'coverExtracted' => $coverPath !== null,
+                    'item' => Items::find($id),
+                ]);
+            }
+
+            if ($method === 'POST' && $id !== null && $action === 'extract-cover') {
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
                 }
-                unset($meta['series_name']);
-                if ($meta) {
-                    Items::update($id, $meta);
+                if (!Thumbnails::available()) {
+                    respond(200, [
+                        'extracted' => false,
+                        'reason' => "L'extension GD n'est pas disponible sur le serveur",
+                        'item' => $item,
+                    ]);
                 }
-                respond(200, ['extracted' => true, 'item' => Items::find($id)]);
+                $coverPath = extractAndSaveCover($item);
+                respond(200, ['extracted' => $coverPath !== null, 'item' => Items::find($id)]);
             }
             if ($method === 'GET' && $id === null) {
                 $limit = min(200, max(1, (int) ($_GET['limit'] ?? 60)));

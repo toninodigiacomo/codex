@@ -156,6 +156,33 @@ paths otherwise. `compose.yml` bind-mounts `./libraries` (read-only) to
 folders here (or symlink them in) for metadata extraction — and later,
 the reader — to have anything to read.
 
+## Cover thumbnails
+
+`POST /api/items/:id/extract-cover` (and, for comics, automatically as
+part of `extract-metadata`) generates a thumbnail and saves it under
+`public/assets/covers/<item-id>.jpg`, updating `cover_path`. What counts
+as "the cover" depends on type (`src/CoverExtractor.php`):
+
+- **comic** — the first page, naturally sorted the way a reader would
+  order pages (`page002.jpg` before `page010.jpg`), skipping hidden/system
+  entries like `__MACOSX/`.
+- **ebook** — the cover declared in the EPUB's own manifest (EPUB3
+  `properties="cover-image"`, or EPUB2's `<meta name="cover">` + matching
+  manifest item), falling back to the first image in the archive if
+  nothing is declared.
+- **other** (a standalone image file) — the file itself.
+
+Extracting from `.epub`/`.cbz` reuses `MiniZip.php`. Resizing (down to
+480px wide, saved as JPEG) uses **GD** — also not bundled by default in
+`php:8.2-apache`, so it's checked for and installed at container start,
+same pattern as `pdo_sqlite`/`simplexml`.
+
+**Magazines (PDF) don't have thumbnail generation yet** — rendering a PDF
+page to an image needs something PHP has no built-in support for at all
+(Ghostscript or Imagick, typically), a heavier dependency than anything
+above. Same story as CBR: worth adding once it's actually needed, not
+before.
+
 ## Local hosting
 
 ```bash
@@ -165,10 +192,10 @@ docker compose up -d
 Same pattern as My Lost Treasure: `public/` read-only except
 `public/assets/` (read-write, for covers/uploads later), `data/`
 read-write, PHP upload limits raised for large scans (`docker/uploads.ini`).
-The container also checks for `pdo_sqlite` and `simplexml` at startup and
-installs whichever is missing (neither usually is — both are commonly
-bundled by default, this is just a safety net, and only costs time on the
-rare first boot where one is actually absent).
+The container also checks for `pdo_sqlite`, `simplexml`, and `gd` at
+startup and installs whichever is missing (none usually are — all three
+are commonly bundled by default; this is just a safety net, and only
+costs time on the rare first boot where one is actually absent).
 
 ## License
 

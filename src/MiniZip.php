@@ -3,14 +3,14 @@
 declare(strict_types=1);
 
 /**
- * Reads a single named entry out of a ZIP-format archive (.cbz, .epub,
- * plain .zip) without needing the "zip" PHP extension — that extension
- * wraps libzip and isn't reliably present in the stock php:8.2-apache
- * image (installing it means either a custom Dockerfile or recompiling
- * on every container start, neither of which fits this project). The ZIP
- * container format itself is simple enough to parse by hand; the only
- * real dependency is DEFLATE decompression, which core PHP always has via
- * zlib's gzinflate() — no extension needed for that.
+ * Reads entries out of a ZIP-format archive (.cbz, .epub, plain .zip)
+ * without needing the "zip" PHP extension — that extension wraps libzip
+ * and isn't reliably present in the stock php:8.2-apache image (installing
+ * it means either a custom Dockerfile or recompiling on every container
+ * start, neither of which fits this project). The ZIP container format
+ * itself is simple enough to parse by hand; the only real dependency is
+ * DEFLATE decompression, which core PHP always has via zlib's
+ * gzinflate() — no extension needed for that.
  *
  * Only classic (32-bit) ZIP is supported, which covers effectively every
  * real-world comic/ebook archive; multi-gigabyte ZIP64 files are out of
@@ -24,33 +24,73 @@ final class MiniZip
 
     /**
      * Returns the raw (decompressed) content of the first entry whose
-     * basename matches $entryBasename (case-insensitive), or null if the
-     * archive can't be read or contains no such entry.
+     * basename matches $entryBasename (case-insensitive) — e.g. finding
+     * "ComicInfo.xml" without knowing/caring what folder it's in. Null if
+     * the archive can't be read or contains no such entry.
      */
     public static function readEntry(string $absolutePath, string $entryBasename): ?string
+    {
+        return self::withCentralDirectory($absolutePath, function ($fh, array $entries) use ($entryBasename) {
+            foreach ($entries as $name => $header) {
+                if (strcasecmp(basename($name), $entryBasename) === 0) {
+                    return self::readEntryData($fh, $header);
+                }
+            }
+            return null;
+        });
+    }
+
+    /**
+     * Returns the raw (decompressed) content of the entry whose full path
+     * inside the archive exactly matches $entryPath (case-insensitive,
+     * slashes normalized) — for when the basename alone isn't enough to
+     * disambiguate (e.g. an EPUB's declared cover file).
+     */
+    public static function readEntryExact(string $absolutePath, string $entryPath): ?string
+    {
+        $wanted = strtolower(ltrim(str_replace('\\', '/', $entryPath), '/'));
+        return self::withCentralDirectory($absolutePath, function ($fh, array $entries) use ($wanted) {
+            foreach ($entries as $name => $header) {
+                if (strtolower(ltrim(str_replace('\\', '/', $name), '/')) === $wanted) {
+                    return self::readEntryData($fh, $header);
+                }
+            }
+            return null;
+        });
+    }
+
+    /** Returns every entry's full path inside the archive, in central-directory order, or []. */
+    public static function listEntries(string $absolutePath): array
+    {
+        $result = self::withCentralDirectory($absolutePath, fn($fh, array $entries) => array_keys($entries));
+        return $result ?? [];
+    }
+
+    /**
+     * Opens the archive, locates and parses its central directory once,
+     * and hands the file handle + a [name => header] map to $callback —
+     * shared setup for all the read operations above.
+     */
+    private static function withCentralDirectory(string $absolutePath, callable $callback)
     {
         $fh = @fopen($absolutePath, 'rb');
         if ($fh === false) {
             return null;
         }
-
         try {
             $size = filesize($absolutePath);
             if ($size === false || $size < 22) {
                 return null;
             }
-
             $eocd = self::findEndOfCentralDirectory($fh, $size);
             if ($eocd === null) {
                 return null;
             }
-
-            $entry = self::findCentralDirectoryEntry($fh, $eocd, $entryBasename);
-            if ($entry === null) {
+            $entries = self::readCentralDirectory($fh, $eocd);
+            if ($entries === null) {
                 return null;
             }
-
-            return self::readEntryData($fh, $entry);
+            return $callback($fh, $entries);
         } finally {
             fclose($fh);
         }
@@ -82,7 +122,8 @@ final class MiniZip
         return $fields === false ? null : $fields;
     }
 
-    private static function findCentralDirectoryEntry($fh, array $eocd, string $entryBasename): ?array
+    /** @return array<string, array>|null map of entry name => central directory header fields */
+    private static function readCentralDirectory($fh, array $eocd): ?array
     {
         fseek($fh, $eocd['cdOffset']);
         $cd = fread($fh, $eocd['cdSize']);
@@ -90,6 +131,7 @@ final class MiniZip
             return null;
         }
 
+        $entries = [];
         $pos = 0;
         for ($i = 0; $i < $eocd['entries']; $i++) {
             if (substr($cd, $pos, 4) !== self::CENTRAL_SIG) {
@@ -105,12 +147,10 @@ final class MiniZip
             }
             $nameStart = $pos + 46;
             $name = substr($cd, $nameStart, $header['nameLen']);
-            if (strcasecmp(basename($name), $entryBasename) === 0) {
-                return $header;
-            }
+            $entries[$name] = $header;
             $pos = $nameStart + $header['nameLen'] + $header['extraLen'] + $header['commentLen'];
         }
-        return null;
+        return $entries;
     }
 
     private static function readEntryData($fh, array $entry): ?string

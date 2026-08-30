@@ -108,10 +108,13 @@
       ${
         item.type === 'comic'
           ? `<div class="extract-row">
-              <button type="button" class="btn btn-secondary" id="extractBtn">Extraire les métadonnées du fichier .cbz</button>
+              <button type="button" class="btn btn-secondary" id="extractBtn">Extraire les métadonnées + la couverture du fichier .cbz</button>
               <span class="extract-status" id="extractStatus"></span>
             </div>`
-          : ''
+          : `<div class="extract-row">
+              <button type="button" class="btn btn-secondary" id="extractCoverBtn">Extraire la couverture</button>
+              <span class="extract-status" id="extractStatus"></span>
+            </div>`
       }
 
       <form id="itemForm">
@@ -156,16 +159,36 @@
         status.textContent = 'Lecture du fichier...';
         try {
           const res = await fetchJson(`/api/items/${itemId}/extract-metadata`, { method: 'POST' });
-          if (res.extracted) {
-            status.textContent = 'Métadonnées trouvées et appliquées.';
-            render(res.item);
-          } else {
-            status.textContent = 'Aucun ComicInfo.xml trouvé dans ce fichier — saisie manuelle.';
-            extractBtn.disabled = false;
-          }
+          const parts = [];
+          parts.push(res.extracted ? 'métadonnées trouvées' : 'aucun ComicInfo.xml trouvé');
+          parts.push(res.coverExtracted ? 'couverture extraite' : 'pas de couverture extraite');
+          status.textContent = parts.join(', ') + '.';
+          render(res.item);
         } catch (err) {
           status.textContent = `Erreur : ${err.message}`;
           extractBtn.disabled = false;
+        }
+      });
+    }
+
+    const extractCoverBtn = document.getElementById('extractCoverBtn');
+    if (extractCoverBtn) {
+      extractCoverBtn.addEventListener('click', async () => {
+        const status = document.getElementById('extractStatus');
+        extractCoverBtn.disabled = true;
+        status.textContent = 'Lecture du fichier...';
+        try {
+          const res = await fetchJson(`/api/items/${itemId}/extract-cover`, { method: 'POST' });
+          if (res.extracted) {
+            status.textContent = 'Couverture extraite.';
+            render(res.item);
+          } else {
+            status.textContent = res.reason || 'Aucune image trouvée dans ce fichier.';
+            extractCoverBtn.disabled = false;
+          }
+        } catch (err) {
+          status.textContent = `Erreur : ${err.message}`;
+          extractCoverBtn.disabled = false;
         }
       });
     }
