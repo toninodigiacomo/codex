@@ -85,13 +85,29 @@ CREATE INDEX IF NOT EXISTS idx_item_tags_tag_id ON item_tags(tag_id);
 
 CREATE TABLE IF NOT EXISTS users (
   id                     INTEGER PRIMARY KEY,
-  username               TEXT NOT NULL UNIQUE,
-  password_hash          TEXT NOT NULL,
+  username               TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  email                  TEXT,
+  password_hash          TEXT,             -- NULL until an invited user accepts and sets one
   role                   TEXT NOT NULL DEFAULT 'reader' CHECK (role IN ('admin', 'reader')),
-  totp_secret            TEXT,
+  status                 TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active')),
+  totp_secret            TEXT,             -- NULL = this user has no MFA set up yet
+  mfa_required           INTEGER NOT NULL DEFAULT 0, -- admin-forced: 1 blocks login until the user enrolls
+  invite_token_hash      TEXT,
+  invite_token_expires   TEXT,
   remember_token_hash    TEXT,
   remember_token_expires TEXT,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_libraries (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, library_id)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT
 );
 
 CREATE TABLE IF NOT EXISTS login_attempts (

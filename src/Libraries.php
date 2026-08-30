@@ -31,6 +31,23 @@ final class Libraries
         return (int) $pdo->lastInsertId();
     }
 
+    public static function update(int $id, array $fields): void
+    {
+        $sets = [];
+        $params = [':id' => $id];
+        foreach (['name', 'path'] as $c) {
+            if (array_key_exists($c, $fields) && trim((string) $fields[$c]) !== '') {
+                $sets[] = "$c = :$c";
+                $params[":$c"] = trim((string) $fields[$c]);
+            }
+        }
+        if (!$sets) {
+            return;
+        }
+        $stmt = Database::connection()->prepare('UPDATE libraries SET ' . implode(', ', $sets) . ' WHERE id = :id');
+        $stmt->execute($params);
+    }
+
     public static function delete(int $id): void
     {
         $stmt = Database::connection()->prepare('DELETE FROM libraries WHERE id = ?');

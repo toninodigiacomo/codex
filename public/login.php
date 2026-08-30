@@ -17,6 +17,7 @@ if (Auth::isLoggedIn()) {
 
 $error = null;
 $justSetUp = isset($_GET['setup']);
+$justWelcomed = isset($_GET['welcome']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::isLockedOut()) {
@@ -28,8 +29,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $code = (string) ($_POST['totp_code'] ?? '');
         $remember = isset($_POST['remember']);
 
-        if (Auth::attemptLogin($username, $password, $code, $remember)) {
+        $result = Auth::attemptLogin($username, $password, $code, $remember);
+        if ($result === 'ok') {
             header('Location: /library.php');
+            exit;
+        }
+        if ($result === 'mfa_setup_required') {
+            header('Location: /mfa-setup.php');
             exit;
         }
         $error = "Nom d'utilisateur, mot de passe ou code invalide.";
@@ -104,6 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       <?php if ($justSetUp && !$error): ?>
         <div class="success-box">Compte créé. Connecte-toi avec ton mot de passe et un code de ton application.</div>
+      <?php elseif ($justWelcomed && !$error): ?>
+        <div class="success-box">Compte activé — tu peux te connecter.</div>
       <?php endif; ?>
       <?php if ($error): ?>
         <div class="error-box"><?= htmlspecialchars($error) ?></div>
@@ -119,8 +127,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <input class="input" id="password" name="password" type="password" required autocomplete="current-password" />
         </div>
         <div class="field">
-          <label for="totp_code">Code à 6 chiffres</label>
-          <input class="input" id="totp_code" name="totp_code" required pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" />
+          <label for="totp_code">Code à 6 chiffres (si l'authentification à deux facteurs est activée)</label>
+          <input class="input" id="totp_code" name="totp_code" pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" placeholder="Laisser vide si MFA désactivée" />
         </div>
         <label class="remember-row">
           <input type="checkbox" id="remember" name="remember" />

@@ -56,14 +56,16 @@ final class Auth
     public static function completeSetup(string $username, string $password, string $totpSecret): void
     {
         $stmt = Database::connection()->prepare(
-            'INSERT INTO users (username, password_hash, role, totp_secret) VALUES (?, ?, ?, ?)'
+            "INSERT INTO users (username, password_hash, role, status, totp_secret) VALUES (?, ?, 'admin', 'active', ?)"
         );
-        $stmt->execute([$username, password_hash($password, PASSWORD_DEFAULT), 'admin', $totpSecret]);
+        $stmt->execute([$username, password_hash($password, PASSWORD_DEFAULT), $totpSecret]);
     }
 
     private static function loadUserByUsername(string $username): ?array
     {
-        $stmt = Database::connection()->prepare('SELECT * FROM users WHERE username = ?');
+        // Case-insensitive on purpose: "Admin" vs "admin" is a classic
+        // login footgun, not a security boundary worth enforcing here.
+        $stmt = Database::connection()->prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE');
         $stmt->execute([$username]);
         $row = $stmt->fetch();
         return $row ?: null;
@@ -88,6 +90,45 @@ final class Auth
             header('Location: /login.php');
             exit;
         }
+    }
+
+    public static function isAdmin(): bool
+    {
+        return self::isLoggedIn() && ($_SESSION['role'] ?? null) === 'admin';
+    }
+
+    public static function requireAdmin(): void
+    {
+        self::requireLogin();
+        if (!self::isAdmin()) {
+            http_response_code(403);
+            echo 'Accès réservé aux administrateurs.';
+            exit;
+        }
+    }
+
+    public static function requireAdminApi(): void
+    {
+        self::requireLoginApi();
+        if (!self::isAdmin()) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Accès réservé aux administrateurs']);
+            exit;
+        }
+    }
+
+    /** @return array{id:int,username:string,role:string}|null */
+    public static function currentUser(): ?array
+    {
+        if (!self::isLoggedIn()) {
+            return null;
+        }
+        return [
+            'id' => (int) $_SESSION['user_id'],
+            'username' => (string) $_SESSION['username'],
+            'role' => (string) $_SESSION['role'],
+        ];
     }
 
     public static function requireLoginApi(): void
@@ -166,36 +207,90 @@ final class Auth
      * Attempt login with username + password + 6-digit TOTP code.
      * Returns true on success, false on failure (any reason).
      */
-    public static function attemptLogin(string $username, string $password, string $totpCode, bool $remember = false): bool
+    /**
+     * @return string 'ok' | 'invalid' | 'mfa_setup_required' — the last
+     * one means the password was correct but an admin has forced MFA on
+     * this account and it has no secret enrolled yet; the session is left
+     * NOT authenticated (only a pending marker is set) until
+     * completeForcedMfaEnrollment() succeeds.
+     */
+    public static function attemptLogin(string $username, string $password, string $totpCode, bool $remember = false): string
     {
         if (self::isLockedOut()) {
-            return false;
+            return 'invalid';
         }
         $user = self::loadUserByUsername($username);
-        if (!$user) {
+        if (!$user || $user['status'] !== 'active' || $user['password_hash'] === null) {
             self::recordFailure();
+            return 'invalid';
+        }
+
+        if (!password_verify($password, $user['password_hash'])) {
+            self::recordFailure();
+            return 'invalid';
+        }
+
+        if ($user['totp_secret'] === null) {
+            if ((int) $user['mfa_required'] === 1) {
+                self::clearFailures();
+                session_regenerate_id(true);
+                $_SESSION['pending_mfa_user_id'] = (int) $user['id'];
+                $_SESSION['pending_mfa_remember'] = $remember;
+                return 'mfa_setup_required';
+            }
+            // MFA neither set up nor required for this account — plain login.
+            self::clearFailures();
+            self::completeLogin($user, $remember);
+            return 'ok';
+        }
+
+        // Account has MFA enrolled — a valid code is mandatory, same as always.
+        if (!Totp::verify((string) $user['totp_secret'], $totpCode)) {
+            self::recordFailure();
+            return 'invalid';
+        }
+        self::clearFailures();
+        self::completeLogin($user, $remember);
+        return 'ok';
+    }
+
+    /** @return int|null the user id waiting to finish a forced MFA enrollment, if any, in this session */
+    public static function pendingMfaSetupUserId(): ?int
+    {
+        return isset($_SESSION['pending_mfa_user_id']) ? (int) $_SESSION['pending_mfa_user_id'] : null;
+    }
+
+    /** Verifies the code against $secret, and if correct, saves it as the user's TOTP secret and completes login. */
+    public static function completeForcedMfaEnrollment(string $secret, string $code): bool
+    {
+        $userId = self::pendingMfaSetupUserId();
+        if ($userId === null || !Totp::verify($secret, $code)) {
             return false;
         }
-
-        $passOk = password_verify($password, $user['password_hash']);
-        $totpOk = Totp::verify((string) $user['totp_secret'], $totpCode);
-
-        if ($passOk && $totpOk) {
-            self::clearFailures();
-            session_regenerate_id(true);
-            $_SESSION['authenticated'] = true;
-            $_SESSION['user_id'] = (int) $user['id'];
-            $_SESSION['username'] = $user['username'];
-            $_SESSION['role'] = $user['role'];
-            $_SESSION['last_seen'] = time();
-            if ($remember) {
-                self::issueRememberToken((int) $user['id']);
-            }
-            return true;
+        $user = self::loadUserById($userId);
+        if (!$user) {
+            return false;
         }
+        $stmt = Database::connection()->prepare('UPDATE users SET totp_secret = ? WHERE id = ?');
+        $stmt->execute([$secret, $userId]);
 
-        self::recordFailure();
-        return false;
+        $remember = !empty($_SESSION['pending_mfa_remember']);
+        unset($_SESSION['pending_mfa_user_id'], $_SESSION['pending_mfa_remember']);
+        self::completeLogin($user, $remember);
+        return true;
+    }
+
+    private static function completeLogin(array $user, bool $remember): void
+    {
+        session_regenerate_id(true);
+        $_SESSION['authenticated'] = true;
+        $_SESSION['user_id'] = (int) $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['role'] = $user['role'];
+        $_SESSION['last_seen'] = time();
+        if ($remember) {
+            self::issueRememberToken((int) $user['id']);
+        }
     }
 
     /**

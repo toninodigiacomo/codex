@@ -216,6 +216,61 @@ request, reads included — the browser's session cookie is sent
 automatically, so `library.js`/`item.js` needed no changes to work
 against the now-protected API.
 
+## Admin console
+
+`/admin.php` (admin role only — `Auth::requireAdmin()`) has three tabs:
+
+- **Utilisateurs** — invite a user by username + email + role
+  (admin/reader) + which libraries they can see. No password is set by the
+  admin: an invite link (`/accept-invite.php?token=...`) is generated and
+  emailed via the configured SMTP relay; if sending fails (or SMTP isn't
+  configured yet), the link is shown directly in the admin UI to copy and
+  send manually — nothing is ever blocked on email actually working.
+  On that page, the invited person sets their own password and, **unless
+  the admin has checked "Exiger la MFA" at invite time**, decides for
+  themselves whether to enable it. When forced, the MFA/QR-code step isn't
+  optional — the checkbox is replaced by a note explaining it's required,
+  and the account can't activate without a valid code. Either way, the
+  admin can also force (or lift) the requirement **after the fact** on an
+  already-active account — if it doesn't have a secret enrolled yet, its
+  next login stops right after the password check and lands on
+  `/mfa-setup.php` instead of the library: the session is deliberately
+  left half-authenticated (`pending_mfa_user_id` set, but not
+  `authenticated`) until they scan a QR code and confirm a code, so
+  nothing else — no page, no API call — is reachable in between. A user
+  with no MFA and no requirement logs in with just a password, same as
+  always; one with MFA enrolled (by choice or by force) needs a code every
+  time from then on. The admin can resend an invite
+  (issues a fresh 7-day token), change a user's role/library access, or
+  delete them — blocked from deleting/demoting the last remaining admin,
+  or deleting their own account.
+- **Bibliothèques** — add/edit/delete `libraries` rows (name + path,
+  relative to the `libraries/` mount — see below).
+- **Réglages** — SMTP relay configuration (host, port, encryption,
+  credentials, from-address) plus a "send a test email" button to verify
+  it before relying on it for real invites. The password field is never
+  echoed back by the API (`smtp_password_set: true/false` only) and is
+  left untouched if you save the form without retyping it.
+
+**Reader access is actually enforced, not just recorded**: `/api/items`
+(list, and single-item lookup by id) is filtered server-side to a
+reader's assigned libraries — `src/Items.php`'s `library_ids` filter plus
+a `currentUserAllowedLibraries()` check in the API layer that admins skip
+entirely. A reader with no libraries assigned sees nothing, by design,
+rather than defaulting to "everything" — an admin has to deliberately
+grant access.
+
+## Sending email — `src/Mailer.php`
+
+A small hand-written SMTP client (connect, optional STARTTLS, AUTH LOGIN,
+MAIL FROM/RCPT TO/DATA) rather than pulling in PHPMailer or a Composer
+dependency — same reasoning as `MiniZip.php`: the protocol itself is
+simple enough, and PHP's `mail()` shells out to a local MTA a minimal
+container doesn't have configured (and residential IPs generally can't
+send mail directly to begin with, ISPs block outbound port 25). Point it
+at whatever SMTP relay you already have — Gmail, your email provider,
+etc. — via the Réglages tab.
+
 ## Local hosting
 
 ```bash

@@ -27,6 +27,9 @@ Auth::requireLogin();
       <label class="seg-opt"><input type="radio" name="type" value="ebook" /><span>Ebooks</span></label>
       <label class="seg-opt"><input type="radio" name="type" value="magazine" /><span>Magazines</span></label>
     </div>
+    <?php if (Auth::isAdmin()): ?>
+      <a href="admin.php" class="btn btn-ghost">Administration</a>
+    <?php endif; ?>
     <a href="logout.php" class="btn btn-ghost" title="Déconnexion (<?= htmlspecialchars($_SESSION['username'] ?? '') ?>)">Déconnexion</a>
   </nav>
 

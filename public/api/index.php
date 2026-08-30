@@ -12,6 +12,9 @@ require_once __DIR__ . '/../../src/Paths.php';
 require_once __DIR__ . '/../../src/ComicInfo.php';
 require_once __DIR__ . '/../../src/CoverExtractor.php';
 require_once __DIR__ . '/../../src/Thumbnails.php';
+require_once __DIR__ . '/../../src/Users.php';
+require_once __DIR__ . '/../../src/Settings.php';
+require_once __DIR__ . '/../../src/Mailer.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -84,11 +87,29 @@ function resolveSeriesName(array &$body): void
     }
 }
 
+/**
+ * Returns the list of library ids the logged-in user is allowed to see,
+ * or null if they're an admin (no restriction at all). A 'reader' with
+ * no libraries explicitly assigned sees an empty array — nothing — not
+ * "everything", so newly invited accounts default to seeing nothing until
+ * an admin grants access.
+ */
+function currentUserAllowedLibraries(): ?array
+{
+    $current = Auth::currentUser();
+    if (!$current || $current['role'] === 'admin') {
+        return null;
+    }
+    $user = Users::find($current['id']);
+    return $user['library_ids'] ?? [];
+}
+
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $uri = preg_replace('#^/api/?#', '', $uri);
 $segments = array_values(array_filter(explode('/', trim((string) $uri, '/')), fn($s) => $s !== ''));
 $resource = $segments[0] ?? null;
-$id = isset($segments[1]) ? (int) $segments[1] : null;
+$rawSecondSegment = $segments[1] ?? null; // kept as a string too — not every resource's 2nd segment is a numeric id (e.g. /api/settings/test-email)
+$id = $rawSecondSegment !== null ? (int) $rawSecondSegment : null;
 $action = $segments[2] ?? null;
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -150,6 +171,13 @@ try {
                     'tag_id' => isset($_GET['tag_id']) ? (int) $_GET['tag_id'] : null,
                     'query' => $_GET['q'] ?? null,
                 ], fn($v) => $v !== null && $v !== '');
+                $allowedLibraryIds = currentUserAllowedLibraries();
+                if ($allowedLibraryIds !== null) {
+                    if (!$allowedLibraryIds) {
+                        respond(200, ['items' => [], 'total' => 0]);
+                    }
+                    $filters['library_ids'] = $allowedLibraryIds;
+                }
                 $sort = (string) ($_GET['sort'] ?? 'title');
                 $dir = (string) ($_GET['dir'] ?? 'ASC');
                 respond(200, Items::search($filters, $sort, $dir, $limit, $offset));
@@ -157,6 +185,10 @@ try {
             if ($method === 'GET' && $id !== null) {
                 $item = Items::find($id);
                 if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                $allowedLibraryIds = currentUserAllowedLibraries();
+                if ($allowedLibraryIds !== null && !in_array((int) $item['library_id'], $allowedLibraryIds, true)) {
                     respond(404, ['error' => 'Item introuvable']);
                 }
                 respond(200, $item);
@@ -195,11 +227,22 @@ try {
                 respond(200, Libraries::all());
             }
             if ($method === 'POST' && $id === null) {
+                Auth::requireAdminApi();
                 $body = bodyJson();
                 $newId = Libraries::create((string) ($body['name'] ?? ''), (string) ($body['path'] ?? ''));
                 respond(201, Libraries::find($newId));
             }
+            if ($method === 'PUT' && $id !== null) {
+                Auth::requireAdminApi();
+                Libraries::update($id, bodyJson());
+                $lib = Libraries::find($id);
+                if (!$lib) {
+                    respond(404, ['error' => 'Bibliothèque introuvable']);
+                }
+                respond(200, $lib);
+            }
             if ($method === 'DELETE' && $id !== null) {
+                Auth::requireAdminApi();
                 Libraries::delete($id);
                 respond(200, ['deleted' => true]);
             }
@@ -246,6 +289,135 @@ try {
             if ($method === 'DELETE' && $id !== null) {
                 Tags::delete($id);
                 respond(200, ['deleted' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'users':
+            Auth::requireAdminApi();
+
+            if ($method === 'GET' && $id === null) {
+                respond(200, Users::all());
+            }
+            if ($method === 'GET' && $id !== null) {
+                $u = Users::find($id);
+                if (!$u) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                respond(200, $u);
+            }
+            if ($method === 'POST' && $id === null) {
+                $body = bodyJson();
+                [$user, $token] = Users::invite(
+                    (string) ($body['username'] ?? ''),
+                    (string) ($body['email'] ?? ''),
+                    (string) ($body['role'] ?? 'reader'),
+                    is_array($body['library_ids'] ?? null) ? $body['library_ids'] : [],
+                    !empty($body['mfa_required'])
+                );
+                $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
+                $mailResult = Mailer::send(
+                    (string) $body['email'],
+                    'Ton accès à Codex',
+                    "Bonjour {$user['username']},\n\n"
+                    . "Un accès à la bibliothèque Codex vient de t'être créé.\n"
+                    . "Choisis ton mot de passe ici pour l'activer :\n\n{$inviteUrl}\n\n"
+                    . "Ce lien expire dans 7 jours."
+                );
+                respond(201, [
+                    'user' => $user,
+                    'inviteUrl' => $inviteUrl,
+                    'emailSent' => $mailResult['ok'],
+                    'emailError' => $mailResult['error'],
+                ]);
+            }
+            if ($method === 'PUT' && $id !== null) {
+                $body = bodyJson();
+                if (array_key_exists('role', $body)) {
+                    $current = Users::find($id);
+                    if ($current && $current['role'] === 'admin' && $body['role'] !== 'admin' && Users::adminCount() <= 1) {
+                        respond(400, ['error' => "Impossible de retirer le dernier compte administrateur"]);
+                    }
+                    Users::updateRole($id, (string) $body['role']);
+                }
+                if (array_key_exists('library_ids', $body) && is_array($body['library_ids'])) {
+                    Users::setLibraries($id, $body['library_ids']);
+                }
+                if (array_key_exists('mfa_required', $body)) {
+                    Users::setMfaRequired($id, (bool) $body['mfa_required']);
+                }
+                $u = Users::find($id);
+                if (!$u) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                respond(200, $u);
+            }
+            if ($method === 'DELETE' && $id !== null) {
+                $current = Users::find($id);
+                if (!$current) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                if ($current['role'] === 'admin' && Users::adminCount() <= 1) {
+                    respond(400, ['error' => 'Impossible de supprimer le dernier compte administrateur']);
+                }
+                if (Auth::currentUser()['id'] === $id) {
+                    respond(400, ['error' => 'Impossible de supprimer ton propre compte']);
+                }
+                Users::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'invites':
+            Auth::requireAdminApi();
+            if ($method === 'POST' && $id !== null && $action === 'resend') {
+                $user = Users::find($id);
+                if (!$user) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                $token = Users::regenerateInvite($id);
+                $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
+                $mailResult = Mailer::send(
+                    (string) $user['email'],
+                    'Ton accès à Codex',
+                    "Bonjour {$user['username']},\n\nVoici un nouveau lien pour activer ton accès à Codex :\n\n{$inviteUrl}\n\nCe lien expire dans 7 jours."
+                );
+                respond(200, [
+                    'inviteUrl' => $inviteUrl,
+                    'emailSent' => $mailResult['ok'],
+                    'emailError' => $mailResult['error'],
+                ]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'settings':
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $config = Settings::smtpConfig();
+                $config['smtp_password_set'] = !empty($config['smtp_password']);
+                unset($config['smtp_password']);
+                $config['site_url'] = Settings::siteUrl();
+                respond(200, $config);
+            }
+            if ($method === 'PUT') {
+                $body = bodyJson();
+                if (isset($body['site_url'])) {
+                    Settings::set('site_url', trim((string) $body['site_url']) ?: null);
+                    unset($body['site_url']);
+                }
+                if (isset($body['smtp_password']) && trim((string) $body['smtp_password']) === '') {
+                    unset($body['smtp_password']); // blank = "leave unchanged", not "clear it"
+                }
+                Settings::setSmtpConfig($body);
+                respond(200, ['saved' => true]);
+            }
+            if ($method === 'POST' && $rawSecondSegment === 'test-email') {
+                $body = bodyJson();
+                $to = (string) ($body['to'] ?? '');
+                if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                    respond(400, ['error' => 'Adresse e-mail invalide']);
+                }
+                $result = Mailer::send($to, 'Test Codex', "Ceci est un e-mail de test envoyé depuis Codex.\n\nSi tu le reçois, la configuration SMTP fonctionne.");
+                respond(200, ['sent' => $result['ok'], 'error' => $result['error']]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 

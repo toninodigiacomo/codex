@@ -233,6 +233,15 @@ final class Items
             $where[] = 'items.library_id = :library_id';
             $params[':library_id'] = $filters['library_id'];
         }
+        if (!empty($filters['library_ids']) && is_array($filters['library_ids'])) {
+            $placeholders = [];
+            foreach (array_values($filters['library_ids']) as $i => $libId) {
+                $key = ":lib$i";
+                $placeholders[] = $key;
+                $params[$key] = (int) $libId;
+            }
+            $where[] = 'items.library_id IN (' . implode(',', $placeholders) . ')';
+        }
         if (!empty($filters['series_id'])) {
             $where[] = 'items.series_id = :series_id';
             $params[':series_id'] = $filters['series_id'];
