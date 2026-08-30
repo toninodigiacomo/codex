@@ -11,38 +11,31 @@
   @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
 
   .pitch {
-    background: var(--color-accent-900); color: var(--color-neutral-100);
+    background:
+      radial-gradient(120% 90% at 15% 100%, color-mix(in srgb, var(--color-accent) 30%, transparent), transparent 60%),
+      var(--color-neutral-900);
+    color: var(--color-neutral-100);
     padding: 34px 34px 27px; display: flex; flex-direction: column; justify-content: space-between;
-    position: relative; overflow: hidden;
   }
-  .pitch::before {
-    content: ""; position: absolute; inset: 0; opacity: 0.14;
-    background-image:
-      linear-gradient(currentColor 1px, transparent 1px),
-      linear-gradient(90deg, currentColor 1px, transparent 1px);
-    background-size: 34px 34px;
-  }
-  .pitch > * { position: relative; }
   .pitch-brand { display: flex; align-items: baseline; gap: 9px; }
-  .pitch-brand .name { font-family: var(--font-heading); font-weight: 700; font-size: 22px; letter-spacing: 0.06em; text-transform: uppercase; }
-  .pitch-brand .sub { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.6; }
-  .pitch h1 { font-size: clamp(34px, 5vw, 58px); line-height: 0.98; letter-spacing: -0.02em; text-transform: uppercase; margin: 0; max-width: 460px; }
-  .pitch p { margin: 20px 0 0; font-size: 14px; line-height: 1.6; opacity: 0.78; max-width: 340px; }
+  .pitch-brand .name { font-family: var(--font-heading); font-weight: 900; font-size: 22px; letter-spacing: -0.02em; }
+  .pitch-brand .sub { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.55; }
+  .pitch h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.02; letter-spacing: -0.03em; margin: 0; max-width: 460px; }
+  .pitch p { margin: 20px 0 0; font-size: 14.5px; line-height: 1.6; opacity: 0.75; max-width: 340px; }
   .spec-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; font-size: 11px; line-height: 1.5; }
-  .spec-row div { border-top: 1px solid rgba(244,239,226,0.28); padding-top: 8px; }
-  .spec-row .k { opacity: 0.55; letter-spacing: 0.09em; text-transform: uppercase; font-size: 9.5px; }
-  .spec-row .v { font-family: var(--font-heading); font-size: 17px; letter-spacing: 0.01em; margin-top: 3px; }
+  .spec-row div { border-top: 1px solid rgba(242,242,240,0.16); padding-top: 8px; }
+  .spec-row .k { opacity: 0.5; letter-spacing: 0.08em; text-transform: uppercase; font-size: 9.5px; font-weight: 600; }
+  .spec-row .v { font-family: var(--font-heading); font-weight: 700; font-size: 15px; margin-top: 3px; }
 
   .form-side { display: flex; align-items: center; justify-content: center; padding: 40px 36px; }
   .form-wrap { width: 100%; max-width: 352px; }
-  .step-label { margin: 0 0 10px; color: var(--color-accent); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .step-label { margin: 0 0 10px; color: var(--color-accent); font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
   .form-wrap h2 { margin: 0 0 6px; }
   .form-wrap .lead { font-size: 13.5px; margin-bottom: 20px; }
   .field-stack { display: flex; flex-direction: column; gap: 12px; }
-  .btn-frame { position: relative; }
 
   .demo-note { margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--color-divider); }
-  .demo-note .lbl { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 9px; }
+  .demo-note .lbl { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 9px; }
 </style>
 </head>
 <body>
@@ -55,10 +48,10 @@
     </div>
     <div>
       <h1>Toute ma bibliothèque, à portée de clic.</h1>
-      <p>Ebooks, bandes dessinées, magazines et scans — indexés depuis mes propres disques, lisibles depuis n'importe quel navigateur.</p>
+      <p>BD, ebooks, magazines et scans — indexés depuis mes propres disques, lisibles depuis n'importe quel navigateur.</p>
     </div>
     <div class="spec-row">
-      <div><div class="k">Formats</div><div class="v">EPUB · CBZ · PDF</div></div>
+      <div><div class="k">Formats</div><div class="v">CBZ · CBR · EPUB · PDF</div></div>
       <div><div class="k">Bibliothèque</div><div class="v">Personnelle</div></div>
       <div><div class="k">Hébergement</div><div class="v">Local</div></div>
     </div>
@@ -79,14 +72,11 @@
           <label for="password">Mot de passe</label>
           <input class="input" id="password" name="password" type="password" />
         </div>
-        <div class="btn-frame blueprint">
-          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-          <button type="submit" class="btn btn-primary btn-block" style="margin:0;">Continuer</button>
-        </div>
+        <button type="submit" class="btn btn-primary btn-block">Continuer</button>
       </form>
 
       <div class="demo-note">
-        <div class="lbl">// à propos</div>
+        <div class="lbl">À propos</div>
         <p class="text-muted" style="font-size:12.5px;margin:0;">Codex est une archive personnelle — les couvertures, formats et contenus s'affichent une fois la bibliothèque connectée.</p>
       </div>
     </div>

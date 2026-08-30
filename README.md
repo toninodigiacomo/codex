@@ -11,20 +11,17 @@ server admin panel, the mobile layout, and real authentication.
 
 ## Design
 
-Structure and component grammar adapted from a "Industry" design-system
-mockup (blueprint cards: square corners, hairline borders, "+" corner
-registration marks, modular grid) — recolored to match My Lost Treasure's
-dark navy / amber palette and Space Mono / Literata typography instead of
-the source system's light steel-blue theme. All tokens live in
-`public/css/style.css` (`--color-*`, `--font-*`, `--space-*`, `--radius-*`,
-`--shadow-*`) — component classes (`.btn`, `.card`, `.field`/`.input`,
-`.nav`, `.tag`, `.table`, `.dialog`, `.blueprint` + `.corner`) read from
-those variables, nothing is hardcoded.
-
-The mockup this was adapted from also specs four more screens not built
-yet: a library-browsing view (sidebar with shelves/libraries/tags, search,
-grid/list toggle, "continue reading" row), a reader, a server admin panel,
-and a mobile layout.
+Visual direction: **comiXology** — near-black background, a bold signature
+orange, big poster-style cover art, rounded modern UI, clean sans-serif
+type (Inter). This replaced an earlier, more "technical blueprint" mockup
+this project started from (hairline square-cornered cards, monospace
+headings) — the change is purely in `public/css/style.css` and the pages'
+own layout CSS; nothing in the database or API changed. Tokens: `--color-*`
+(near-black ground `#0e0e10`, accent orange `#ff5a1f`, secondary blue
+`#4fa8ff`, plus 100–900 ramps for each), `--font-*` (Inter throughout),
+`--space-*`, `--radius-*` (rounded now — 6/10/16px, not the old sharp 0),
+`--shadow-*`. Component classes (`.btn`, `.card`, `.field`/`.input`,
+`.nav`, `.tag`, `.table`, `.dialog`) read from those variables.
 
 ## Database
 

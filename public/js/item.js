@@ -92,8 +92,7 @@
 
     page.innerHTML = `
       <div class="item-head">
-        <div class="item-cover-lg blueprint">
-          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div class="item-cover-lg">
           ${item.cover_path ? `<img src="${esc(item.cover_path)}" alt="" />` : `<div class="fallback">${esc(item.title)}</div>`}
         </div>
         <div class="item-head-info">

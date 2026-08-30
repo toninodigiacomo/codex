@@ -3,9 +3,10 @@
 .item-cover-lg {
   width: 200px; flex-shrink: 0; aspect-ratio: 2/3; background: var(--color-surface);
   display: flex; align-items: center; justify-content: center; overflow: hidden;
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
 }
 .item-cover-lg img { width: 100%; height: 100%; object-fit: cover; }
-.item-cover-lg .fallback { padding: var(--space-3); text-align: center; font-family: var(--font-heading); font-size: 15px; }
+.item-cover-lg .fallback { padding: var(--space-3); text-align: center; font-family: var(--font-heading); font-weight: 700; font-size: 15px; }
 .item-head-info { flex: 1; min-width: 240px; }
 .item-head-info h1 { margin-bottom: 4px; }
 .item-head-info .kicker { color: var(--color-accent); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px; }
