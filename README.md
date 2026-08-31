@@ -274,19 +274,45 @@ etc. — via the Réglages tab.
 ## Role separation: admins don't browse
 
 Admin accounts are for administering, not reading. `Auth::requireReaderPage()`
-(used by `library.php`/`item.php`) and `Auth::requireReaderApi()` (used by
-`/api/items`, `/api/tags`, `/api/series`) both redirect/reject an admin
-just like they would a logged-out visitor, sending them to `/admin.php`
-instead. Post-login redirects (`login.php`, `index.php`, `mfa-setup.php`)
-are role-aware too — an admin lands on `/admin.php`, a reader on
-`/library.php`. `/api/libraries` stays open to both roles: the admin
-console's own Libraries/Users tabs and the reader-facing sidebar both need
-it.
+(`library.php`) and `Auth::requireReaderApi()` (only the `/api/items` list —
+`GET` with no id — plus `/api/tags` and `/api/series`) redirect/reject an
+admin just like they would a logged-out visitor. **Managing individual
+items stays open to admins** — `item.php`, and `/api/items` for anything
+that isn't the browsing list (single-item read, create, update, delete,
+metadata/cover extraction) — since that's curation work, not the reading
+experience the restriction is actually about. Post-login redirects
+(`login.php`, `index.php`, `mfa-setup.php`) are role-aware too — an admin
+lands on `/admin.php`, a reader on `/library.php`. `/api/libraries` stays
+open to both roles: the admin console's own tabs and the reader-facing
+sidebar both need it.
 
-**Known gap this creates**: item metadata editing and ComicRack/cover
-extraction currently only exist on `item.php` — which is now unreachable
-for admins. There's no dedicated admin screen for managing item content
-yet. Worth building next if that's needed day-to-day.
+**Known gap**: there's still no list/browse view built specifically for
+admins to find an existing item to edit — `item.php` needs an id in the
+URL. Worth a small admin-side item list once that's needed day-to-day.
+
+## Reader library access — deny by default
+
+A reader's access to `/api/items` is scoped to the libraries an admin has
+explicitly granted them (`user_libraries`) — **empty by default**, not
+"everything": a newly invited reader sees nothing until an admin grants
+access, whether at invite time or afterward. Each user row in the admin
+console's Utilisateurs tab has a **"Bibliothèques..."** button (readers
+only) that opens a checklist of every library to grant/revoke, independent
+of when the account was created — adding a new library later doesn't
+retroactively grant anyone access to it; each reader's list has to be
+updated deliberately.
+
+## Library path picker
+
+Adding or editing a library, the **"Parcourir..."** button next to the
+path field opens a small folder browser (`GET /api/browse-libraries`,
+admin-only) rooted at the `libraries/` mount — click into a folder to
+descend, ".." to go back up, "Choisir ce dossier" to fill in the field.
+Browsing is strictly confined to that mount: the endpoint resolves the
+requested path with `realpath()` and rejects anything that doesn't land
+back inside `Paths::libraryRoot()`, so `../../etc` (or a sibling folder
+that merely shares a string prefix with the mount, e.g. `libraries-evil`)
+can't be listed.
 
 ## Schema migrations
 

@@ -36,6 +36,7 @@
   display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
   gap: var(--space-4) var(--space-3);
 }
+.item-grid[hidden] { display: none; }
 
 .item-card { text-decoration: none; color: var(--color-text); display: flex; flex-direction: column; }
 .item-cover {

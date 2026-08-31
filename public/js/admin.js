@@ -136,6 +136,48 @@
     }
   }
 
+  function openLibraryAccessEditor(user, libraries) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'dialog-backdrop';
+    backdrop.innerHTML = `
+      <div class="dialog">
+        <div class="dialog-title">Bibliothèques accessibles — ${esc(user.username)}</div>
+        <div class="dialog-body">Par défaut, un lecteur n'a accès à rien. Coche les bibliothèques auxquelles il doit pouvoir accéder.</div>
+        <div class="lib-checks">
+          ${
+            libraries.length
+              ? libraries
+                  .map(
+                    (l) =>
+                      `<label class="lib-check"><input type="checkbox" value="${l.id}" ${user.library_ids.includes(l.id) ? 'checked' : ''} /> ${esc(l.name)}</label>`
+                  )
+                  .join('')
+              : '<span class="text-muted" style="font-size:13px;">Aucune bibliothèque configurée.</span>'
+          }
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="laCancel">Annuler</button>
+          <button type="button" class="btn btn-primary" id="laSave">Enregistrer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+    document.getElementById('laCancel').addEventListener('click', () => backdrop.remove());
+    document.getElementById('laSave').addEventListener('click', async () => {
+      const libraryIds = Array.from(backdrop.querySelectorAll('.lib-checks input:checked')).map((el) => Number(el.value));
+      try {
+        await api('PUT', `/api/users/${user.id}`, { library_ids: libraryIds });
+        showToast('Accès mis à jour.');
+        backdrop.remove();
+        loaded.users = false;
+        renderUsersTab();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  }
+
   function renderUserList(users, libraries) {
     const list = document.getElementById('userList');
     if (!users.length) {
@@ -156,9 +198,16 @@
           <span class="badge ${u.status === 'active' ? 'badge-active' : 'badge-invited'}">${u.status === 'active' ? 'Actif' : 'Invité'}</span>
           ${u.status === 'active' ? `<span class="badge ${u.mfa_enabled ? 'badge-mfa' : 'badge-nomfa'}">${u.mfa_enabled ? 'MFA activée' : 'MFA désactivée'}</span>` : ''}
           ${u.mfa_required ? `<span class="badge badge-mfa">MFA exigée</span>` : ''}
-          ${libNames.length ? `<span class="badge badge-reader">${esc(libNames.join(', '))}</span>` : ''}
+          ${
+            u.role === 'reader'
+              ? libNames.length
+                ? `<span class="badge badge-reader">${esc(libNames.join(', '))}</span>`
+                : `<span class="badge badge-noaccess">Aucun accès</span>`
+              : ''
+          }
         </div>
         <div class="admin-row-actions">
+          ${u.role === 'reader' ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">Bibliothèques...</button>` : ''}
           <button class="btn btn-secondary btn-sm" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? 'Lever l\'exigence MFA' : 'Exiger la MFA'}</button>
           ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm" data-resend="${u.id}">Renvoyer</button>` : ''}
           ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm" data-delete-user="${u.id}">Supprimer</button>` : ''}
@@ -166,6 +215,13 @@
       </div>`;
       })
       .join('');
+
+    list.querySelectorAll('[data-edit-access]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const user = users.find((u) => u.id === Number(btn.dataset.editAccess));
+        openLibraryAccessEditor(user, libraries);
+      });
+    });
 
     list.querySelectorAll('[data-toggle-mfa]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -209,6 +265,57 @@
   // ============================================================
   // Libraries
   // ============================================================
+  function openFolderPicker(startPath, onChoose) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'dialog-backdrop';
+    backdrop.innerHTML = `
+      <div class="dialog folder-picker">
+        <div class="dialog-title">Choisir un dossier</div>
+        <div class="folder-picker-path" id="fpPath"></div>
+        <div class="folder-picker-list" id="fpList"><p class="text-muted">Chargement...</p></div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="fpCancel">Annuler</button>
+          <button type="button" class="btn btn-primary" id="fpChoose">Choisir ce dossier</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    let current = startPath || '';
+
+    async function load(path) {
+      const pathEl = document.getElementById('fpPath');
+      const listEl = document.getElementById('fpList');
+      listEl.innerHTML = '<p class="text-muted">Chargement...</p>';
+      try {
+        const res = await api('GET', `/api/browse-libraries?path=${encodeURIComponent(path)}`);
+        current = res.path;
+        pathEl.textContent = 'libraries/' + (res.path || '');
+        const rows = [];
+        if (res.parent !== null) {
+          rows.push(`<button type="button" class="folder-picker-item" data-nav="${esc(res.parent)}">.. (dossier parent)</button>`);
+        }
+        res.entries.forEach((entry) => {
+          rows.push(`<button type="button" class="folder-picker-item" data-nav="${esc(entry.path)}">📁 ${esc(entry.name)}</button>`);
+        });
+        listEl.innerHTML = rows.length ? rows.join('') : '<p class="text-muted">Aucun sous-dossier ici.</p>';
+        listEl.querySelectorAll('[data-nav]').forEach((btn) => {
+          btn.addEventListener('click', () => load(btn.dataset.nav));
+        });
+      } catch (err) {
+        listEl.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      }
+    }
+
+    document.getElementById('fpCancel').addEventListener('click', () => backdrop.remove());
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+    document.getElementById('fpChoose').addEventListener('click', () => {
+      onChoose(current);
+      backdrop.remove();
+    });
+
+    load(startPath || '');
+  }
+
   async function renderLibrariesTab() {
     const panel = panels.libraries;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
@@ -221,7 +328,7 @@
         </div>
         <div class="admin-card">
           <h2>Ajouter une bibliothèque</h2>
-          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Le chemin est relatif au dossier <code>libraries/</code> monté par <code>compose.yml</code> — ex. <code>comics</code>, <code>bd-franco-belge</code>, <code>fumetti</code>, <code>livres</code>, <code>magazines</code>.</p>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Le chemin est relatif au dossier <code>libraries/</code> monté par <code>compose.yml</code>.</p>
           <form class="admin-form" id="libForm">
             <div class="admin-form-row">
               <div class="field">
@@ -230,7 +337,10 @@
               </div>
               <div class="field">
                 <label for="libPath">Chemin (relatif)</label>
-                <input class="input" id="libPath" required placeholder="bd-franco-belge" />
+                <div class="path-field">
+                  <input class="input" id="libPath" required placeholder="bd-franco-belge" />
+                  <button type="button" class="btn btn-secondary btn-sm" id="libBrowseBtn">Parcourir...</button>
+                </div>
               </div>
             </div>
             <div>
@@ -240,6 +350,13 @@
         </div>
       `;
       renderLibList(libraries);
+
+      document.getElementById('libBrowseBtn').addEventListener('click', () => {
+        openFolderPicker(document.getElementById('libPath').value.trim(), (chosen) => {
+          document.getElementById('libPath').value = chosen;
+        });
+      });
+
       document.getElementById('libForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
@@ -268,7 +385,7 @@
     list.innerHTML = libraries
       .map(
         (l) => `
-      <div class="admin-row">
+      <div class="admin-row" id="lib-row-${l.id}">
         <div class="admin-row-main">
           <strong>${esc(l.name)}</strong>
           <span>libraries/${esc(l.path)}</span>
@@ -282,20 +399,52 @@
       .join('');
 
     list.querySelectorAll('[data-edit-lib]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         const lib = libraries.find((l) => l.id === Number(btn.dataset.editLib));
-        const name = prompt('Nom de la bibliothèque :', lib.name);
-        if (name === null) return;
-        const path = prompt('Chemin relatif :', lib.path);
-        if (path === null) return;
-        try {
-          await api('PUT', `/api/libraries/${lib.id}`, { name, path });
-          showToast('Bibliothèque mise à jour.');
+        const row = document.getElementById(`lib-row-${lib.id}`);
+        row.outerHTML = `
+          <div class="admin-row admin-row-edit" id="lib-row-${lib.id}">
+            <form class="admin-form-row edit-lib-form" data-save-lib="${lib.id}" style="flex:1;align-items:flex-end;">
+              <div class="field">
+                <label>Nom</label>
+                <input class="input" id="editLibName-${lib.id}" value="${esc(lib.name)}" required />
+              </div>
+              <div class="field">
+                <label>Chemin (relatif)</label>
+                <div class="path-field">
+                  <input class="input" id="editLibPath-${lib.id}" value="${esc(lib.path)}" required />
+                  <button type="button" class="btn btn-secondary btn-sm" id="editLibBrowse-${lib.id}">Parcourir...</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button type="submit" class="btn btn-primary btn-sm">Enregistrer</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit="${lib.id}">Annuler</button>
+              </div>
+            </form>
+          </div>`;
+
+        document.getElementById(`editLibBrowse-${lib.id}`).addEventListener('click', () => {
+          const pathInput = document.getElementById(`editLibPath-${lib.id}`);
+          openFolderPicker(pathInput.value.trim(), (chosen) => { pathInput.value = chosen; });
+        });
+        document.querySelector(`[data-cancel-edit="${lib.id}"]`).addEventListener('click', () => {
           loaded.libraries = false;
           renderLibrariesTab();
-        } catch (err) {
-          showToast(err.message, true);
-        }
+        });
+        document.querySelector(`[data-save-lib="${lib.id}"]`).addEventListener('submit', async (e) => {
+          e.preventDefault();
+          try {
+            await api('PUT', `/api/libraries/${lib.id}`, {
+              name: document.getElementById(`editLibName-${lib.id}`).value.trim(),
+              path: document.getElementById(`editLibPath-${lib.id}`).value.trim(),
+            });
+            showToast('Bibliothèque mise à jour.');
+            loaded.libraries = false;
+            renderLibrariesTab();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
       });
     });
     list.querySelectorAll('[data-delete-lib]').forEach((btn) => {

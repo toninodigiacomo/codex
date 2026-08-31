@@ -2,7 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
 Auth::bootSession();
-Auth::requireReaderPage();
+Auth::requireLogin(); // item management is administration, not browsing — admins can reach this page
 ?>
 <!DOCTYPE html>
 <html lang="fr">
