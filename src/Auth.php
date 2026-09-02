@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Totp.php';
+require_once __DIR__ . '/Settings.php';
 
 final class Auth
 {
@@ -130,6 +131,21 @@ final class Auth
             echo json_encode(['error' => 'Accès réservé aux administrateurs']);
             exit;
         }
+    }
+
+    /**
+     * For endpoints an external scheduler needs to call without a browser
+     * session (a host crontab entry, for instance) — accepts either a
+     * logged-in admin session, or the shared sync token as an
+     * X-Sync-Token header.
+     */
+    public static function requireAdminOrSyncTokenApi(): void
+    {
+        $header = $_SERVER['HTTP_X_SYNC_TOKEN'] ?? '';
+        if ($header !== '' && hash_equals(Settings::syncToken(), $header)) {
+            return;
+        }
+        self::requireAdminApi();
     }
 
     /** @return array{id:int,username:string,role:string}|null */

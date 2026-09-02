@@ -20,14 +20,17 @@ final class Libraries
         return $row ?: null;
     }
 
-    public static function create(string $name, string $path): int
+    public static function create(string $name, string $path, string $type = 'comic'): int
     {
         if (trim($name) === '' || trim($path) === '') {
             throw new InvalidArgumentException('Le nom et le chemin sont requis');
         }
+        if (!in_array($type, ['comic', 'ebook', 'magazine', 'other'], true)) {
+            throw new InvalidArgumentException('Type de bibliothèque invalide');
+        }
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('INSERT INTO libraries (name, path) VALUES (?, ?)');
-        $stmt->execute([$name, $path]);
+        $stmt = $pdo->prepare('INSERT INTO libraries (name, path, type) VALUES (?, ?, ?)');
+        $stmt->execute([$name, $path, $type]);
         return (int) $pdo->lastInsertId();
     }
 
@@ -40,6 +43,14 @@ final class Libraries
                 $sets[] = "$c = :$c";
                 $params[":$c"] = trim((string) $fields[$c]);
             }
+        }
+        if (array_key_exists('type', $fields)) {
+            $type = (string) $fields['type'];
+            if (!in_array($type, ['comic', 'ebook', 'magazine', 'other'], true)) {
+                throw new InvalidArgumentException('Type de bibliothèque invalide');
+            }
+            $sets[] = 'type = :type';
+            $params[':type'] = $type;
         }
         if (!$sets) {
             return;

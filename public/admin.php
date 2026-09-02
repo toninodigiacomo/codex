@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Asset.php';
 Auth::bootSession();
 Auth::requireAdmin();
 $me = Auth::currentUser();
@@ -12,8 +13,8 @@ $me = Auth::currentUser();
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Administration — Codex</title>
 <meta name="current-user-id" content="<?= (int) $me['id'] ?>" />
-<link rel="stylesheet" href="css/style.css" />
-<link rel="stylesheet" href="css/admin.css" />
+<link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
+<link rel="stylesheet" href="<?= asset('css/admin.css') ?>" />
 </head>
 <body>
 
@@ -40,7 +41,7 @@ $me = Auth::currentUser();
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/admin.js"></script>
+<script src="<?= asset('js/admin.js') ?>"></script>
 
 </body>
 </html>

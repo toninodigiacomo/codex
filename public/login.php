@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Asset.php';
 
 Auth::bootSession();
 
@@ -48,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Connexion — Codex</title>
-<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
   .split { display: grid; grid-template-columns: minmax(360px, 44%) 1fr; min-height: 100vh; }

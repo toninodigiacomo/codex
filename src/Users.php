@@ -79,7 +79,7 @@ final class Users
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new InvalidArgumentException('Adresse e-mail invalide');
         }
-        if (!in_array($role, ['admin', 'reader'], true)) {
+        if (!in_array($role, ['admin', 'reader', 'reader_basic'], true)) {
             throw new InvalidArgumentException('Rôle invalide');
         }
 
@@ -89,14 +89,21 @@ final class Users
             'INSERT INTO users (username, email, role, status, mfa_required, invite_token_hash, invite_token_expires)
              VALUES (:username, :email, :role, \'invited\', :mfa_required, :hash, :expires)'
         );
-        $stmt->execute([
-            ':username' => $username,
-            ':email' => $email,
-            ':role' => $role,
-            ':mfa_required' => $mfaRequired ? 1 : 0,
-            ':hash' => hash('sha256', $token),
-            ':expires' => date('c', time() + self::INVITE_TTL),
-        ]);
+        try {
+            $stmt->execute([
+                ':username' => $username,
+                ':email' => $email,
+                ':role' => $role,
+                ':mfa_required' => $mfaRequired ? 1 : 0,
+                ':hash' => hash('sha256', $token),
+                ':expires' => date('c', time() + self::INVITE_TTL),
+            ]);
+        } catch (PDOException $e) {
+            if (str_contains($e->getMessage(), 'UNIQUE constraint failed')) {
+                throw new InvalidArgumentException("Ce nom d'utilisateur existe déjà");
+            }
+            throw $e;
+        }
         $userId = (int) $pdo->lastInsertId();
         self::setLibraries($userId, $libraryIds);
 
@@ -144,7 +151,7 @@ final class Users
 
     public static function updateRole(int $userId, string $role): void
     {
-        if (!in_array($role, ['admin', 'reader'], true)) {
+        if (!in_array($role, ['admin', 'reader', 'reader_basic'], true)) {
             throw new InvalidArgumentException('Rôle invalide');
         }
         $stmt = Database::connection()->prepare('UPDATE users SET role = ? WHERE id = ?');

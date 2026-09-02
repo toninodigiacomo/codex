@@ -6,9 +6,11 @@
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS libraries (
-  id   INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE
+  id              INTEGER PRIMARY KEY,
+  name            TEXT NOT NULL,
+  path            TEXT NOT NULL UNIQUE,
+  type            TEXT NOT NULL DEFAULT 'comic' CHECK (type IN ('comic', 'ebook', 'magazine', 'other')),
+  last_synced_at  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS series (
@@ -31,6 +33,7 @@ CREATE TABLE IF NOT EXISTS items (
   series_id    INTEGER REFERENCES series(id) ON DELETE SET NULL,
   issue_number REAL,
   synopsis     TEXT,
+  metadata_checked_at TEXT,        -- when extraction was last attempted, success or not — NOT the same as "has a cover": a magazine or an unreadable file is legitimately never going to have one, and must not be retried forever
   added_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -88,7 +91,7 @@ CREATE TABLE IF NOT EXISTS users (
   username               TEXT NOT NULL UNIQUE COLLATE NOCASE,
   email                  TEXT,
   password_hash          TEXT,             -- NULL until an invited user accepts and sets one
-  role                   TEXT NOT NULL DEFAULT 'reader' CHECK (role IN ('admin', 'reader')),
+  role                   TEXT NOT NULL DEFAULT 'reader_basic' CHECK (role IN ('admin', 'reader', 'reader_basic')),
   status                 TEXT NOT NULL DEFAULT 'invited' CHECK (status IN ('invited', 'active')),
   totp_secret            TEXT,             -- NULL = this user has no MFA set up yet
   mfa_required           INTEGER NOT NULL DEFAULT 0, -- admin-forced: 1 blocks login until the user enrolls
@@ -117,10 +120,12 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 
 CREATE TABLE IF NOT EXISTS reading_progress (
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-  position   TEXT,               -- page number, EPUB CFI, scroll offset... whatever the reader needs
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id      INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  position     TEXT,               -- page number, EPUB CFI, scroll offset... whatever the reader needs
+  total_pages  INTEGER,            -- cached page count, so a progress bar doesn't need to reopen the archive
+  completed_at TEXT,               -- non-NULL = explicitly marked "read"; independent of position
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   PRIMARY KEY (user_id, item_id)
 );
 

@@ -17,7 +17,7 @@ final class Items
 
     private const BASE_FIELDS = [
         'title', 'path', 'format', 'cover_path', 'publisher',
-        'library_id', 'series_id', 'issue_number', 'synopsis',
+        'library_id', 'series_id', 'issue_number', 'synopsis', 'metadata_checked_at',
     ];
 
     private const SORTABLE = ['title', 'added_at', 'issue_number'];

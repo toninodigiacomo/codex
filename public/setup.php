@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Totp.php';
 
 Auth::bootSession();
@@ -56,7 +57,7 @@ $uri = Totp::provisioningUri($secret, 'admin', $issuer);
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Configuration — Codex</title>
-<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
   .setup-wrap { max-width: 480px; margin: 0 auto; padding: 48px 20px 64px; }

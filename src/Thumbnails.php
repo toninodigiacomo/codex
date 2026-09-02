@@ -3,64 +3,36 @@
 declare(strict_types=1);
 
 /**
- * Turns raw image bytes (pulled from inside a .cbz/.epub, or an uploaded
- * photo) into a reasonably-sized JPEG saved under public/assets/covers/,
- * so the library grid isn't loading full-resolution scans for every tile.
- * Uses GD — not bundled by default in php:8.2-apache either, checked for
- * and installed at container start the same way as pdo_sqlite/simplexml.
+ * Writes extracted cover bytes straight to disk, at their original
+ * resolution and format — no resizing.
+ *
+ * This deliberately doesn't use GD. Resizing would need it, and unlike
+ * the ZIP-reading problem (MiniZip.php) — where the format itself was
+ * simple enough to reimplement in pure PHP — GD has no such shortcut:
+ * getting it working means compiling it against zlib/libpng/libjpeg dev
+ * headers that the base php:8.2-apache image doesn't ship, which in turn
+ * means network access and a compiler at *every container recreation*
+ * (the compiled extension lives in the container's writable layer, which
+ * doesn't survive `docker compose down && up`, only a plain restart) —
+ * a real reliability cost for a "nice to have". Serving full-resolution
+ * cover art costs a bit more bandwidth per grid tile; on a personal home
+ * server that's a fine trade for never having a working feature turn into
+ * a broken one because a package mirror was unreachable on some reboot.
  */
 final class Thumbnails
 {
-    private const MAX_WIDTH = 480;
-    private const JPEG_QUALITY = 82;
-
     public static function available(): bool
     {
-        return function_exists('imagecreatefromstring');
+        return true; // no dependency to check for anymore
     }
 
-    /**
-     * Resizes $imageData (raw bytes of any GD-supported format) down to
-     * MAX_WIDTH if wider, saves it as a JPEG at $destAbsolutePath
-     * (creating the destination folder if needed), and returns true on
-     * success.
-     */
-    public static function saveResized(string $imageData, string $destAbsolutePath): bool
+    /** Writes $imageData to $destAbsolutePath as-is, creating the destination folder if needed. */
+    public static function save(string $imageData, string $destAbsolutePath): bool
     {
-        if (!self::available()) {
-            return false;
-        }
-
-        $src = @imagecreatefromstring($imageData);
-        if ($src === false) {
-            return false;
-        }
-
-        $width = imagesx($src);
-        $height = imagesy($src);
-        if ($width <= 0 || $height <= 0) {
-            imagedestroy($src);
-            return false;
-        }
-
-        if ($width > self::MAX_WIDTH) {
-            $newWidth = self::MAX_WIDTH;
-            $newHeight = (int) round($height * ($newWidth / $width));
-            $dst = imagecreatetruecolor($newWidth, $newHeight);
-            imagecopyresampled($dst, $src, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-            imagedestroy($src);
-        } else {
-            $dst = $src;
-        }
-
         $dir = dirname($destAbsolutePath);
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            imagedestroy($dst);
             return false;
         }
-
-        $ok = imagejpeg($dst, $destAbsolutePath, self::JPEG_QUALITY);
-        imagedestroy($dst);
-        return $ok;
+        return file_put_contents($destAbsolutePath, $imageData) !== false;
     }
 }

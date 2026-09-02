@@ -156,11 +156,11 @@ paths otherwise. `compose.yml` bind-mounts `./libraries` (read-only) to
 folders here (or symlink them in) for metadata extraction — and later,
 the reader — to have anything to read.
 
-## Cover thumbnails
+## Cover images
 
 `POST /api/items/:id/extract-cover` (and, for comics, automatically as
-part of `extract-metadata`) generates a thumbnail and saves it under
-`public/assets/covers/<item-id>.jpg`, updating `cover_path`. What counts
+part of `extract-metadata`) saves the extracted image under
+`public/assets/covers/<item-id>.<ext>`, updating `cover_path`. What counts
 as "the cover" depends on type (`src/CoverExtractor.php`):
 
 - **comic** — the first page, naturally sorted the way a reader would
@@ -172,16 +172,60 @@ as "the cover" depends on type (`src/CoverExtractor.php`):
   nothing is declared.
 - **other** (a standalone image file) — the file itself.
 
-Extracting from `.epub`/`.cbz` reuses `MiniZip.php`. Resizing (down to
-480px wide, saved as JPEG) uses **GD** — also not bundled by default in
-`php:8.2-apache`, so it's checked for and installed at container start,
-same pattern as `pdo_sqlite`/`simplexml`.
+Extracting from `.epub`/`.cbz` reuses `MiniZip.php`. The image is saved
+**at its original resolution and format, unmodified** — `src/Thumbnails.php`
+just writes the bytes to disk, no GD, no resizing. Resizing was tried
+first, but GD isn't bundled by default in `php:8.2-apache` either, and
+unlike `MiniZip.php` (where the ZIP format was simple enough to
+reimplement), there's no equivalent shortcut for image decoding — getting
+GD working means compiling it against zlib/libpng/libjpeg dev headers the
+base image doesn't have, which needs network access and a compiler *every
+time the container is recreated* (the compiled extension lives in the
+writable layer, which `docker compose down && up` wipes — a plain
+`restart` is fine). That's a real reliability cost — a broken package
+mirror on some future reboot silently breaking cover art — for a "nice to
+have" that's just page-load bandwidth. Serving full-resolution scans
+costs a bit more bandwidth per grid tile; that's the trade being made.
 
-**Magazines (PDF) don't have thumbnail generation yet** — rendering a PDF
-page to an image needs something PHP has no built-in support for at all
-(Ghostscript or Imagick, typically), a heavier dependency than anything
-above. Same story as CBR: worth adding once it's actually needed, not
-before.
+**`.pdf` files (regardless of whether they're catalogued as a magazine
+or an ebook) get real page rendering** — `src/PdfRenderer.php` shells
+out to `poppler-utils`' `pdftoppm`/`pdfinfo` (installed at container
+startup, same "check and install what's missing" pattern as the PHP
+extensions) to actually render each page, text and images composed
+together, exactly as a normal PDF viewer would. An earlier version of
+this scanned the raw file for embedded JPEG-compressed image objects and
+used those directly — clever for a PDF that's literally one scanned
+image per page, but wrong for the far more common case of a real
+document (a novel, a gamebook, a word-processor export): a page like
+that has actual vector text plus maybe a small illustration or two, and
+scanning for embedded JPEGs found only those illustrations, floating
+alone on an otherwise-blank page, while every text-only page was
+invisible to it entirely. `poppler-utils` is a mature, widely-packaged
+library — installing it is a meaningfully different trade-off than the
+Ghostscript/Imagick route considered (and declined) earlier in this
+project: a single common apt package, no PHP extension to compile, and
+the interaction is two command-line tools invoked through `proc_open`
+with an argument array (never a shell string built from input), so
+there's nothing here for a crafted filename to inject into. If the
+binaries are missing for any reason, `pageCount()`/`renderPage()`
+return `0`/`null` rather than erroring — a PDF just ends up with no
+pages available, the same as any other extraction failure elsewhere in
+this codebase.
+
+**`.cbr` (RAR) covers work too, within a narrower limit than everything
+else here** — `src/MiniRar.php` reads the RAR5 container format (file
+names, sizes, per-entry compression method) but can only extract an
+entry whose compression method is "store" (none at all). RAR's actual
+compression algorithm is proprietary — unlike ZIP's openly-documented
+DEFLATE (which is why `MiniZip.php` could be written at all), there's no
+equivalent path to decoding it in pure PHP. In practice this still
+covers a meaningful share of real comic archives: compressing an
+already-JPEG page gains essentially nothing, so many scanning/release
+groups store images uncompressed specifically to skip the wasted CPU
+time. A CBR using real compression for its images can't be read at all;
+it's catalogued normally, just without a cover. Only the RAR5 container
+format is handled (what any current archiver produces) — the older RAR4
+structure is a different, unrelated header layout and isn't recognized.
 
 ## Authentication
 
@@ -215,6 +259,41 @@ since `users` was already part of the schema.
 request, reads included — the browser's session cookie is sent
 automatically, so `library.js`/`item.js` needed no changes to work
 against the now-protected API.
+
+## Reader home page — shelves, not a firehose
+
+`library.php` opens in **home mode**: three "shelves" (`#shelf-comic`,
+`#shelf-ebook`, `#shelf-magazine`), each the most recently added items of
+that type, capped at 4 rows. A shelf with fewer items than one full row
+hides entirely rather than showing a half-empty row — a library with
+only 2-3 magazines, say, just doesn't get a magazine shelf yet. The
+first interaction with search or the type tabs — the only two controls
+that live in the sticky top nav, reachable from either mode — switches
+to **browse mode** (the previous single-grid-with-sidebar-filters
+behavior, now also row-trimmed): `library.js`'s `state.mode` flips once
+and stays there for the rest of the session; there's no way back to home
+mode except reloading the page. Default sort, both on the shelves and
+once in browse mode, is most-recently-added first (`added_at DESC`) —
+the dropdown order is Ajouts récents / Ajouts anciens / Titre A→Z / Titre
+Z→A to match.
+
+**No incomplete last row, anywhere.** A CSS grid using
+`auto-fill`/`minmax` doesn't expose "how many columns it settled on" as
+something JS can read from the rule itself — but the browser's
+*resolved* `grid-template-columns` value does, once the grid has
+actually laid out (`getComputedStyle(gridEl).gridTemplateColumns` comes
+back as a space-separated list of track sizes; its length is the column
+count). `renderGridTrimmed()` in `library.js` renders the full item set,
+reads that back, and removes however many trailing cards fall short of
+a full row — used both for the browse grid (fetches up to 120, keeps
+whatever divides evenly by the real column count) and the home shelves
+(same idea, capped at 4 rows first). A debounced `resize` listener
+re-runs the same trim without re-fetching, since the column count
+changes with viewport width. This still isn't something a headless
+browser check could run in this environment — no Chrome available to
+install here — so the row math was unit-tested in isolation (column
+count × row cap × item count, several edge cases including "too few
+items for even one row") rather than watched render.
 
 ## Admin console
 
@@ -308,11 +387,38 @@ Adding or editing a library, the **"Parcourir..."** button next to the
 path field opens a small folder browser (`GET /api/browse-libraries`,
 admin-only) rooted at the `libraries/` mount — click into a folder to
 descend, ".." to go back up, "Choisir ce dossier" to fill in the field.
-Browsing is strictly confined to that mount: the endpoint resolves the
-requested path with `realpath()` and rejects anything that doesn't land
-back inside `Paths::libraryRoot()`, so `../../etc` (or a sibling folder
-that merely shares a string prefix with the mount, e.g. `libraries-evil`)
-can't be listed.
+
+If `libraries/` doesn't exist in the container at all, the endpoint says
+so explicitly rather than a generic "invalid path" — check it exists on
+the host next to `compose.yml`, and that `compose.yml` still has the
+`./libraries:/var/www/html/libraries:ro` mount.
+
+**Bringing in a collection that lives elsewhere on the host: add a
+volume line, don't symlink.** A symlink placed inside `./libraries` on
+the host, pointing at another host path (e.g.
+`ln -s /mnt/nvme0n1/docker/ubooquity/comics libraries/comics`), doesn't
+work — only `./libraries` itself is mounted into the container, so from
+inside it that symlink's target doesn't exist at all, and it's silently
+skipped as a broken link (`is_dir()` on it returns false). The fix is a
+second `volumes:` line in `compose.yml`, mounting the external folder
+directly at the path you want it to appear under `libraries/`:
+
+```yaml
+volumes:
+  - ./libraries:/var/www/html/libraries:ro
+  - /mnt/nvme0n1/docker/ubooquity/comics:/var/www/html/libraries/comics:ro
+```
+
+One line per external source. This makes it a real, ordinary directory
+from the container's point of view — no symlink resolution involved, no
+container/host boundary to cross — so the path picker and everything
+else just sees it like any other folder under `libraries/`. Requires
+`docker compose down && up` (a plain `restart` won't pick up a new
+volume line) each time you add one.
+
+Browsing itself still rejects a literal `..` segment in the requested
+path — a hand-crafted attempt at relative traversal — but doesn't
+otherwise care where a given folder is actually mounted from.
 
 ## Schema migrations
 
@@ -329,6 +435,233 @@ backfilled through each column's own `DEFAULT` — `status` defaults to
 `'active'` specifically because a `users` row that predates the column
 must already be a real, active account, not a pending invite.
 
+Adding a column only gets you so far, though: a `users` table created
+before the invite system existed has `password_hash NOT NULL` (every
+account used to set one immediately at `/setup.php`), and SQLite's
+`ALTER TABLE` has no way to relax an existing `NOT NULL` — only add
+columns. `Database::relaxUsersPasswordHashConstraint()` checks for this
+specifically (`PRAGMA table_info(users)`, the `notnull` flag on
+`password_hash`) and, if needed, does the standard SQLite rebuild dance:
+rename the table out of the way, let `schema.sql` recreate it fresh with
+today's (nullable) definition, copy every row across unchanged, drop the
+renamed original — all in one transaction. A `settings` row marks it done
+so every later request skips straight past the check.
+
+That rename step has a sharp edge worth knowing about: SQLite's modern
+default behavior (`legacy_alter_table` off) doesn't just rename a table —
+it also rewrites the `CREATE TABLE` text of every *other* table that
+references it via foreign key, so their reference follows the new name.
+`user_libraries` and `reading_progress` both reference `users(id)`, so
+renaming `users` to a temporary name mid-migration silently rewrote both
+of them to reference *that* temporary name — and once it was dropped at
+the end of the migration, they were left referencing a table that no
+longer existed. `users` itself came out fine; every later write to either
+of those two tables failed with `no such table: ...temporary name...`,
+which looked unrelated. `Database::repairDanglingUserReferences()` finds
+and fixes any table already left in that state (literally checking each
+candidate's own `CREATE TABLE` text for the temporary name), and the
+rename itself now runs with `legacy_alter_table = ON` so it can't happen
+again.
+
+On top of that: this whole thing runs on every request until it
+succeeds once, and Apache serves multiple requests concurrently — the
+admin console alone fires two API calls in parallel on page load. A
+plain deferred transaction only takes SQLite's write lock at the first
+actual write, so two concurrent requests could both pass the "does this
+need fixing" check before either has written anything, then collide on
+the rename. The migration now opens with `BEGIN IMMEDIATE` (takes the
+write lock immediately) plus `PRAGMA busy_timeout = 5000` on every
+connection, so a second request just waits its turn instead of racing,
+and re-checks the table once unblocked — correctly finding nothing left
+to do if another request already finished.
+
+## Three-tier user roles
+
+`users.role` is one of `admin`, `reader` (branded "Utilisateur avancé"
+in the UI — every existing reader account before this feature became
+this tier automatically, no data migration needed since the DB value
+itself didn't change), or `reader_basic` ("Utilisateur" — same reading
+access as the advanced tier, minus the ability to edit an item's
+metadata). New invites default to `reader_basic`. An existing user's
+role can be changed anytime from the admin console's Utilisateurs tab,
+not just at invite time — a `<select>` right on their row, calling the
+same `PUT /api/users/:id` the invite flow's role field already used.
+
+Adding `reader_basic` needed a table-rebuild migration — same reasoning
+and same care as `password_hash`'s: `role`'s `CHECK` constraint is baked
+into the table at creation time, and SQLite's `ALTER TABLE` can't touch
+an existing `CHECK`. `Database::allowReaderBasicRole()` follows the
+identical pattern (`BEGIN IMMEDIATE` against a concurrent request,
+`legacy_alter_table = ON` so the rename doesn't repeat the dangling
+foreign-key bug the password_hash migration hit, a settings-table marker
+so it only ever runs once).
+
+The restriction itself is enforced server-side, not just hidden in the
+UI: `PUT /api/items/:id` (item.php's save) returns 403 for a
+`reader_basic` session, checked before anything else in that handler —
+confirmed with a direct API call bypassing the UI entirely, not just a
+button click. item.php reads the session role from a data attribute
+(`Auth::requireLogin()` already allows all three roles onto that page,
+same as before) and renders every field `readonly` and omits the
+"Enregistrer" button/status entirely for that tier, so there's nothing
+in the UI suggesting an edit is possible in the first place.
+
+## Full summary popup
+
+The résumé box only has room for so much text before it needs
+scrolling internally. The small expand icon next to the "Résumé" label
+opens a modal (reusing `style.css`'s existing `.dialog`/`.dialog-backdrop`
+component) showing the title and the complete text at a comfortable
+reading size, generously sized so a typical summary never needs to
+scroll — a max-height with its own scroll is still there as a safety
+net for a pathologically long one, rather than ever silently cutting
+text off. Closes via the button, clicking outside, or Escape. Available
+to every role, including `reader_basic` — reading the full text isn't
+an edit.
+
+## Embedded reader
+
+Four icons on an item's page (item.php): download, read, reset progress,
+mark as read. Only image-based formats are readable in the embedded
+viewer — `.cbz`, `.cbr` (only the pages an archive happens to store
+uncompressed — see `MiniRar.php`), `.pdf` (every page, actually
+rendered — see `PdfRenderer.php`), and a standalone image (one page).
+**EPUB is deliberately excluded** — reflowable text needs a genuinely
+different reading UI (chapters, table of contents, re-flowing text), not
+a page-image viewer; `src/ItemPages.php` returns 0 pages for anything
+that isn't one of those four, and the read button disables itself
+accordingly (checked via `GET /api/items/:id/pages` when the item page
+loads).
+
+`src/ItemPages.php` is the single place that knows how to list and fetch
+pages across every supported format — `reader.php`/`reader.js` and the
+API route below don't know or care which one a given item is.
+
+**Reading progress** (`reading_progress` table — `position` as a
+1-based-in-the-UI/0-based-internally page index, `total_pages` cached so
+a progress bar never needs to reopen the archive, `completed_at`
+independent of position so "mark as read" doesn't fight with whatever
+page the position tracking last saved) is per-user, via:
+- `GET /api/items/:id/progress` — current state.
+- `PUT /api/items/:id/progress` — body `{current_page?, total_pages?,
+  completed?}`; the reader calls this (debounced ~400ms after each page
+  turn) as someone reads, and item.php's "Lu" button calls it with just
+  `{completed: true}` (or `false` to un-mark — it's a toggle).
+- `DELETE /api/items/:id/progress` — reset; item.php's reset button only
+  shows once there's something to reset.
+
+`GET /api/items/:id/page?index=N` streams one page's raw image bytes
+(the reader fetches pages one at a time as someone navigates, plus a
+one-page read-ahead in each direction, rather than pulling a whole
+archive up front). `GET /api/items/:id/download` streams the original
+file unmodified with a `Content-Disposition: attachment` filename built
+from the item's title. Both — like every per-item route — enforce the
+same library-access check as the single-item GET (a 404, not a 403, so
+an out-of-scope item's existence isn't revealed).
+
+## Reader nav bar
+
+The top bar's type tabs (Bande Dessinée / Ebooks / Magazines / Fichiers)
+are generated client-side from whichever library **types** actually
+exist — `library.js`'s `renderTypeTabs()` checks the fetched libraries
+list, not a fixed set, so a type with no library at all just doesn't get
+a tab. The Home icon button returns to the shelf-based landing view
+(`switchToHomeMode()`) — the previous "Tous" tab is gone; searching
+without picking a type tab still searches across every type by default,
+so that capability isn't lost, just no longer a dedicated button. The
+username in the top-right opens a small dropdown (currently just
+"Déconnexion"), closing on an outside click or when a menu item is used.
+
+## Discovering content — library sync
+
+Nothing populates `items` on its own — every item in earlier testing
+throughout this project was created by hand via the API. Real discovery
+is `src/LibraryScanner.php`: walks a library's mounted folder
+recursively, creates an item for every recognized file (`.cbz`, `.cbr`,
+`.epub`, `.pdf`, and standalone images) not already indexed by its path,
+and reports — without deleting — any already-indexed item whose file has
+since disappeared. Deleting an orphaned entry is a deliberate action the
+admin takes from the sync result, not something a scan does on its own.
+
+**An item's type comes from its library, not its file extension.** A
+bare `.pdf` is genuinely ambiguous on its own — a scanned comic and a
+magazine issue are both just "a PDF" — but the library it's found in
+("BD Franco-Belge" vs "Sorties Périodiques") isn't. Each library has a
+`type` (comic/ebook/magazine/other), set when it's created or edited,
+and every item discovered under it gets that type; only the per-file
+extension decides the stored `format`.
+
+**Metadata and cover extraction happen automatically, tied to sync — not
+as something any user (reader or admin) can trigger by hand.** There is
+no "extract" button anywhere in the app on purpose: with a library that
+can run into the thousands of items, one-at-a-time was never going to be
+usable, and letting a reader trigger it made no sense to begin with.
+`src/ItemEnrichment.php` (`ComicInfo.xml` reading, cover extraction —
+same logic the earlier per-item buttons used, just relocated and now
+reusable outside the API) runs right after `LibraryScanner` creates a
+newly discovered item, so a normal, day-to-day sync stays incremental:
+only the files that are actually new get processed, same as the file
+discovery itself.
+
+For a library synced before this existed — or any item extraction
+genuinely never got to for some reason — `POST
+/api/libraries/:id/extract-missing` processes a bounded batch (default
+25, capped at 100) of items that have never been checked, and the
+admin console's **"Extraire les métadonnées manquantes"** button calls
+it repeatedly with a progress readout until nothing's left. "Never been
+checked" is tracked with its own column, `items.metadata_checked_at` —
+set the moment extraction is *attempted*, regardless of whether
+anything was actually found. It's deliberately not inferred from
+`cover_path IS NULL`: a magazine (no PDF cover support yet) or a
+genuinely unreadable file will never have a cover no matter how many
+times it's retried, and without this distinction a backfill batch would
+just keep re-selecting the same permanently-empty items forever instead
+of ever finishing.
+
+Cover extraction failures are caught and logged, never thrown past
+`ItemEnrichment::extractAndSaveCover()` — one unusual archive among
+thousands must not take down a whole sync or backfill batch, or turn an
+otherwise-successful metadata read into a confusing error for content
+that already saved correctly.
+
+**Sidecar files from other library tools don't get indexed as content.**
+Anything starting with `.` is always skipped (macOS's `._*` AppleDouble
+files, `.DS_Store` — never configurable, never legitimate content
+either way). On top of that, Réglages has a **configurable exclude
+pattern** (a PCRE regex, checked against each file/folder's own name) —
+covers things like Ubooquity's per-folder `folder.jpg`, `header.jpg`,
+`folder.css`, `folder-info.html`, which otherwise show up in the grid as
+nonsense items ("folder", "header"...) since they're plain image files
+sitting right next to the real content. The Réglages field includes a
+live tester (checks a typed filename against the pattern using PHP's own
+`preg_match` — same engine the scan itself uses, so it means what it
+tests) and a **"Prévisualiser les fiches déjà scannées à tort"** action
+for cleaning up anything indexed before the pattern existed or was
+updated: lists every existing item whose file basename matches the
+current pattern, and deletes them on confirmation. Only fixes what's in
+the database — nothing on disk is touched.
+
+From the admin console's Bibliothèques tab: a **"Synchroniser"** button
+per library, and a **"Tout synchroniser"** button for all of them at
+once — both show a result (added / unchanged / orphaned, with a delete
+button per orphaned entry) right there, no need to check logs.
+
+**Scheduling** doesn't run inside the container — no cron daemon was
+added, on the same "avoid another moving dependency" reasoning as
+everything else in this project (`MiniZip.php`, the hand-written SMTP
+client, dropping GD). Instead, `POST /api/sync-all` and
+`POST /api/libraries/:id/sync` accept a shared secret as an
+`X-Sync-Token` header, as an alternative to a logged-in session — meant
+for an external scheduler (a crontab entry on the host, wherever Codex
+already runs) that has no browser session to work with. The token lives
+in Réglages (view/regenerate it there — regenerating immediately
+invalidates the old one), along with a ready-to-copy example crontab
+line built from it and the configured site URL. This exception is
+scoped narrowly: the token only unlocks the two sync routes specifically
+(checked before the app's normal "every request needs a session" rule
+even runs) — it's never accepted anywhere else, so a leaked token can't
+be used to browse or manage anything beyond triggering a sync.
+
 ## Local hosting
 
 ```bash
@@ -338,10 +671,22 @@ docker compose up -d
 Same pattern as My Lost Treasure: `public/` read-only except
 `public/assets/` (read-write, for covers/uploads later), `data/`
 read-write, PHP upload limits raised for large scans (`docker/uploads.ini`).
-The container also checks for `pdo_sqlite`, `simplexml`, and `gd` at
-startup and installs whichever is missing (none usually are — all three
+The container also checks for `pdo_sqlite` and `simplexml` at
+startup and installs whichever is missing (neither usually is — both
 are commonly bundled by default; this is just a safety net, and only
-costs time on the rare first boot where one is actually absent).
+costs time on the rare first boot where one is actually absent). `gd`
+used to be checked for too, until it turned out to need system libraries
+the base image doesn't ship — see "Cover images" below for why it was
+dropped instead of chased.
+**None of these checks can block Apache from starting** — each step in
+the startup command is independent (`|| true` / `|| echo 'WARN: ...'`
+rather than a single `&&`-chained pipeline), and the final step is
+`exec apache2-foreground`. Earlier revisions chained everything with
+`&&`, which meant one failed step (e.g. an extension install failing
+because the image has no network access, or lacks a build dependency)
+silently killed the whole startup script before Apache ever ran — the
+container would exit right after "Started", and a reverse proxy in front
+of it would show a 502 with nothing useful in the logs to explain why.
 
 ## License
 

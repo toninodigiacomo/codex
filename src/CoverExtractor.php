@@ -3,16 +3,25 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/MiniZip.php';
+require_once __DIR__ . '/MiniRar.php';
+require_once __DIR__ . '/PdfRenderer.php';
 
 /**
  * Finds the source image bytes for an item's cover:
  *  - comic (.cbz): the first page — sorted naturally, the same way a
  *    comic reader determines page order.
+ *  - comic (.cbr): same idea, via MiniRar — only works when the archive
+ *    stores its images without RAR's own (proprietary) compression; see
+ *    MiniRar.php for why, and what that does and doesn't cover.
  *  - ebook (.epub): the cover declared in the package's manifest
  *    (EPUB2's <meta name="cover"> or EPUB3's properties="cover-image"),
  *    falling back to the first image in the archive if nothing is
  *    declared.
  *  - other (a standalone image file): the file itself.
+ *  - any type, when the file is actually a .pdf (scanned comics/books
+ *    are often distributed this way regardless of which library
+ *    they're catalogued under): page 1, actually rendered — see
+ *    PdfRenderer.
  * Returns ['data' => raw bytes, 'ext' => lowercase extension] or null.
  */
 final class CoverExtractor
@@ -21,12 +30,53 @@ final class CoverExtractor
 
     public static function forItem(string $absolutePath, string $type): ?array
     {
+        $ext = strtolower(pathinfo($absolutePath, PATHINFO_EXTENSION));
+        if ($ext === 'pdf') {
+            $data = PdfRenderer::renderPage($absolutePath, 0);
+            return $data === null ? null : ['data' => $data, 'ext' => 'jpg'];
+        }
+        if ($ext === 'cbr') {
+            return self::firstImageInRar($absolutePath);
+        }
         return match ($type) {
             'comic' => self::firstImageInZip($absolutePath),
             'ebook' => self::epubCover($absolutePath) ?? self::firstImageInZip($absolutePath),
             'other' => self::rawImageFile($absolutePath),
             default => null,
         };
+    }
+
+    private static function firstImageInRar(string $absolutePath): ?array
+    {
+        $entries = MiniRar::listEntries($absolutePath);
+        $images = [];
+        foreach ($entries as $entry) {
+            $base = basename($entry['name']);
+            if ($base === '' || str_starts_with($base, '.')) {
+                continue;
+            }
+            $ext = strtolower(pathinfo($entry['name'], PATHINFO_EXTENSION));
+            if (in_array($ext, self::IMAGE_EXTENSIONS, true)) {
+                $images[$entry['name']] = $entry;
+            }
+        }
+        if (!$images) {
+            return null;
+        }
+        $names = array_keys($images);
+        natcasesort($names);
+        foreach ($names as $name) {
+            if ($images[$name]['method'] !== 0) {
+                continue; // compressed — can't decode it, try the next candidate
+            }
+            $data = MiniRar::readStoredEntry($absolutePath, $name);
+            if ($data === null) {
+                continue;
+            }
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            return ['data' => $data, 'ext' => $ext === 'jpeg' ? 'jpg' : $ext];
+        }
+        return null;
     }
 
     private static function rawImageFile(string $absolutePath): ?array

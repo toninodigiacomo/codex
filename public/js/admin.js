@@ -21,28 +21,32 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+    if (!res.ok) {
+      const message = data.error || `Erreur ${res.status}`;
+      throw new Error(data.detail ? `${message} : ${data.detail}` : message);
+    }
     return data;
   }
 
   const currentUserId = Number(document.querySelector('meta[name="current-user-id"]').content);
 
   // ---------- tabs ----------
+  // Always refetch on click rather than caching a render per tab — a
+  // stale "Aucune bibliothèque configurée" on the invite form (because
+  // Libraries were added after Utilisateurs was first opened) is worse
+  // than the cost of one extra fetch.
   const tabs = document.querySelectorAll('.admin-tab');
   const panels = {
     users: document.getElementById('panel-users'),
     libraries: document.getElementById('panel-libraries'),
     settings: document.getElementById('panel-settings'),
   };
-  const loaded = {};
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
       tabs.forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
       Object.entries(panels).forEach(([key, panel]) => { panel.hidden = key !== tab.dataset.tab; });
       const key = tab.dataset.tab;
-      if (loaded[key]) return;
-      loaded[key] = true;
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
       if (key === 'settings') renderSettingsTab();
@@ -77,7 +81,8 @@
               <div class="field">
                 <label for="invRole">Rôle</label>
                 <select class="input" id="invRole">
-                  <option value="reader">Lecteur</option>
+                  <option value="reader_basic" selected>Utilisateur</option>
+                  <option value="reader">Utilisateur avancé</option>
                   <option value="admin">Administrateur</option>
                 </select>
               </div>
@@ -125,7 +130,6 @@
               ${esc(res.inviteUrl)}
             </div>`;
           showToast('Utilisateur invité.');
-          loaded.users = false;
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -170,7 +174,6 @@
         await api('PUT', `/api/users/${user.id}`, { library_ids: libraryIds });
         showToast('Accès mis à jour.');
         backdrop.remove();
-        loaded.users = false;
         renderUsersTab();
       } catch (err) {
         showToast(err.message, true);
@@ -184,9 +187,12 @@
       list.innerHTML = '<p class="text-muted">Aucun utilisateur.</p>';
       return;
     }
+    const ROLE_LABELS = { admin: 'Admin', reader: 'Utilisateur avancé', reader_basic: 'Utilisateur' };
+
     list.innerHTML = users
       .map((u) => {
         const libNames = u.library_ids.map((id) => libraries.find((l) => l.id === id)?.name).filter(Boolean);
+        const isReaderTier = u.role !== 'admin';
         return `
       <div class="admin-row">
         <div class="admin-row-main">
@@ -194,12 +200,12 @@
           <span>${esc(u.email || '')}</span>
         </div>
         <div class="admin-row-badges">
-          <span class="badge ${u.role === 'admin' ? 'badge-admin' : 'badge-reader'}">${u.role === 'admin' ? 'Admin' : 'Lecteur'}</span>
+          <span class="badge ${u.role === 'admin' ? 'badge-admin' : 'badge-reader'}">${esc(ROLE_LABELS[u.role] || u.role)}</span>
           <span class="badge ${u.status === 'active' ? 'badge-active' : 'badge-invited'}">${u.status === 'active' ? 'Actif' : 'Invité'}</span>
           ${u.status === 'active' ? `<span class="badge ${u.mfa_enabled ? 'badge-mfa' : 'badge-nomfa'}">${u.mfa_enabled ? 'MFA activée' : 'MFA désactivée'}</span>` : ''}
           ${u.mfa_required ? `<span class="badge badge-mfa">MFA exigée</span>` : ''}
           ${
-            u.role === 'reader'
+            isReaderTier
               ? libNames.length
                 ? `<span class="badge badge-reader">${esc(libNames.join(', '))}</span>`
                 : `<span class="badge badge-noaccess">Aucun accès</span>`
@@ -207,7 +213,14 @@
           }
         </div>
         <div class="admin-row-actions">
-          ${u.role === 'reader' ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">Bibliothèques...</button>` : ''}
+          ${
+            u.id !== currentUserId
+              ? `<select class="input" data-change-role="${u.id}" style="width:auto;padding:6px 10px;font-size:12.5px;">
+                  ${Object.entries(ROLE_LABELS).map(([val, label]) => `<option value="${val}" ${u.role === val ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+                </select>`
+              : ''
+          }
+          ${isReaderTier ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">Bibliothèques...</button>` : ''}
           <button class="btn btn-secondary btn-sm" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? 'Lever l\'exigence MFA' : 'Exiger la MFA'}</button>
           ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm" data-resend="${u.id}">Renvoyer</button>` : ''}
           ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm" data-delete-user="${u.id}">Supprimer</button>` : ''}
@@ -215,6 +228,19 @@
       </div>`;
       })
       .join('');
+
+    list.querySelectorAll('[data-change-role]').forEach((sel) => {
+      sel.addEventListener('change', async () => {
+        try {
+          await api('PUT', `/api/users/${sel.dataset.changeRole}`, { role: sel.value });
+          showToast('Rôle mis à jour.');
+          renderUsersTab();
+        } catch (err) {
+          showToast(err.message, true);
+          renderUsersTab();
+        }
+      });
+    });
 
     list.querySelectorAll('[data-edit-access]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -229,7 +255,6 @@
         try {
           await api('PUT', `/api/users/${btn.dataset.toggleMfa}`, { mfa_required: nextValue });
           showToast(nextValue ? 'MFA exigée pour cet utilisateur.' : 'Exigence MFA levée.');
-          loaded.users = false;
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -253,7 +278,6 @@
         try {
           await api('DELETE', `/api/users/${btn.dataset.deleteUser}`);
           showToast('Utilisateur supprimé.');
-          loaded.users = false;
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -316,6 +340,20 @@
     load(startPath || '');
   }
 
+  const TYPE_LABELS = { comic: 'BD', ebook: 'Ebook', magazine: 'Magazine', other: 'Autre' };
+
+  function typeOptionsHtml(selected) {
+    return Object.entries(TYPE_LABELS)
+      .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`)
+      .join('');
+  }
+
+  function formatSyncDate(iso) {
+    if (!iso) return 'Jamais synchronisée';
+    const d = new Date(iso);
+    return 'Synchronisée le ' + d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
   async function renderLibrariesTab() {
     const panel = panels.libraries;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
@@ -323,8 +361,12 @@
       const libraries = await api('GET', '/api/libraries');
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>Bibliothèques (${libraries.length})</h2>
+          <div class="admin-card-head">
+            <h2>Bibliothèques (${libraries.length})</h2>
+            <button class="btn btn-secondary btn-sm" id="syncAllBtn" ${libraries.length ? '' : 'disabled'}>Tout synchroniser</button>
+          </div>
           <div class="admin-list" id="libList"></div>
+          <div id="syncAllResult"></div>
         </div>
         <div class="admin-card">
           <h2>Ajouter une bibliothèque</h2>
@@ -342,6 +384,10 @@
                   <button type="button" class="btn btn-secondary btn-sm" id="libBrowseBtn">Parcourir...</button>
                 </div>
               </div>
+              <div class="field">
+                <label for="libType">Type de contenu</label>
+                <select class="input" id="libType">${typeOptionsHtml('comic')}</select>
+              </div>
             </div>
             <div>
               <button type="submit" class="btn btn-primary">Ajouter</button>
@@ -357,15 +403,31 @@
         });
       });
 
+      document.getElementById('syncAllBtn').addEventListener('click', async () => {
+        const box = document.getElementById('syncAllResult');
+        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
+        try {
+          const res = await api('POST', '/api/sync-all');
+          box.innerHTML = res.libraries
+            .map((r) => `<div class="invite-link-box"><strong>${esc(r.library)}</strong> — ${r.added} ajouté(s), ${r.unchanged} inchangé(s), ${r.orphaned.length} orphelin(s)</div>`)
+            .join('');
+          showToast('Synchronisation terminée.');
+          renderLibrariesTab();
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        }
+      });
+
       document.getElementById('libForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
           await api('POST', '/api/libraries', {
             name: document.getElementById('libName').value.trim(),
             path: document.getElementById('libPath').value.trim(),
+            type: document.getElementById('libType').value,
           });
           showToast('Bibliothèque ajoutée.');
-          loaded.libraries = false;
           renderLibrariesTab();
         } catch (err) {
           showToast(err.message, true);
@@ -388,15 +450,70 @@
       <div class="admin-row" id="lib-row-${l.id}">
         <div class="admin-row-main">
           <strong>${esc(l.name)}</strong>
-          <span>libraries/${esc(l.path)}</span>
+          <span>libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)}</span>
+        </div>
+        <div class="admin-row-badges">
+          <span class="badge badge-reader">${TYPE_LABELS[l.type] || l.type}</span>
         </div>
         <div class="admin-row-actions">
-          <button class="btn btn-secondary btn-sm" data-edit-lib="${l.id}">Modifier</button>
-          <button class="btn btn-danger btn-sm" data-delete-lib="${l.id}">Supprimer</button>
+          <div class="admin-row-actions-group">
+            <button class="btn btn-secondary btn-sm" data-sync-lib="${l.id}">Synchroniser</button>
+            <button class="btn btn-secondary btn-sm" data-extract-missing="${l.id}" title="Extraire les métadonnées et couvertures manquantes">Métadonnées manquantes</button>
+          </div>
+          <div class="admin-row-actions-group">
+            <button class="btn btn-secondary btn-sm" data-edit-lib="${l.id}">Modifier</button>
+            <button class="btn btn-danger btn-sm" data-delete-lib="${l.id}">Supprimer</button>
+          </div>
         </div>
+        <div class="sync-result" id="sync-result-${l.id}"></div>
       </div>`
       )
       .join('');
+
+    list.querySelectorAll('[data-sync-lib]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const libId = btn.dataset.syncLib;
+        const box = document.getElementById(`sync-result-${libId}`);
+        btn.disabled = true;
+        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
+        try {
+          const res = await api('POST', `/api/libraries/${libId}/sync`);
+          renderSyncResult(box, res);
+          showToast(`Synchronisation terminée : ${res.added} ajouté(s).`);
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    list.querySelectorAll('[data-extract-missing]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const libId = btn.dataset.extractMissing;
+        const box = document.getElementById(`sync-result-${libId}`);
+        btn.disabled = true;
+        let totalProcessed = 0;
+        try {
+          while (true) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
+            const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=25`);
+            totalProcessed += res.processed;
+            if (res.processed === 0 || res.remaining === 0) {
+              box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
+              break;
+            }
+          }
+          showToast(`Extraction terminée : ${totalProcessed} fiche(s) traitée(s).`);
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
 
     list.querySelectorAll('[data-edit-lib]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -416,6 +533,10 @@
                   <button type="button" class="btn btn-secondary btn-sm" id="editLibBrowse-${lib.id}">Parcourir...</button>
                 </div>
               </div>
+              <div class="field">
+                <label>Type de contenu</label>
+                <select class="input" id="editLibType-${lib.id}">${typeOptionsHtml(lib.type)}</select>
+              </div>
               <div style="display:flex;gap:6px;">
                 <button type="submit" class="btn btn-primary btn-sm">Enregistrer</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit="${lib.id}">Annuler</button>
@@ -428,7 +549,6 @@
           openFolderPicker(pathInput.value.trim(), (chosen) => { pathInput.value = chosen; });
         });
         document.querySelector(`[data-cancel-edit="${lib.id}"]`).addEventListener('click', () => {
-          loaded.libraries = false;
           renderLibrariesTab();
         });
         document.querySelector(`[data-save-lib="${lib.id}"]`).addEventListener('submit', async (e) => {
@@ -437,9 +557,9 @@
             await api('PUT', `/api/libraries/${lib.id}`, {
               name: document.getElementById(`editLibName-${lib.id}`).value.trim(),
               path: document.getElementById(`editLibPath-${lib.id}`).value.trim(),
+              type: document.getElementById(`editLibType-${lib.id}`).value,
             });
             showToast('Bibliothèque mise à jour.');
-            loaded.libraries = false;
             renderLibrariesTab();
           } catch (err) {
             showToast(err.message, true);
@@ -453,8 +573,34 @@
         try {
           await api('DELETE', `/api/libraries/${btn.dataset.deleteLib}`);
           showToast('Bibliothèque supprimée.');
-          loaded.libraries = false;
           renderLibrariesTab();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+    });
+  }
+
+  function renderSyncResult(box, res) {
+    const orphanRows = res.orphaned
+      .map(
+        (o) => `<div class="orphan-row">
+          <span>${esc(o.title)} <span class="text-muted">(${esc(o.path)})</span></span>
+          <button class="btn btn-danger btn-sm" data-delete-orphan="${o.id}">Supprimer</button>
+        </div>`
+      )
+      .join('');
+    box.innerHTML = `
+      <div class="invite-link-box">
+        ${res.added} ajouté(s), ${res.unchanged} inchangé(s)${res.orphaned.length ? `, ${res.orphaned.length} fichier(s) introuvable(s) :` : '.'}
+        ${orphanRows}
+      </div>`;
+    box.querySelectorAll('[data-delete-orphan]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          await api('DELETE', `/api/items/${btn.dataset.deleteOrphan}`);
+          btn.closest('.orphan-row').remove();
+          showToast('Fiche supprimée.');
         } catch (err) {
           showToast(err.message, true);
         }
@@ -537,7 +683,131 @@
             <div id="testResult"></div>
           </form>
         </div>
+        <div class="admin-card">
+          <h2>Filtre de synchronisation</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Expression régulière (PCRE) appliquée au nom de chaque fichier/dossier pendant une synchronisation —
+            une correspondance veut dire "ignorer, ce n'est pas du contenu". Les fichiers macOS <code>._*</code>
+            et <code>.DS_Store</code> sont déjà ignorés automatiquement, pas besoin de les ajouter ici.
+            Par défaut, exclut les fichiers d'accompagnement d'Ubooquity (<code>folder.jpg</code>, <code>header.jpg</code>,
+            <code>folder.css</code>, <code>folder-info.html</code>).
+          </p>
+          <form class="admin-form" id="excludeForm">
+            <div class="field">
+              <label for="excludePattern">Motif d'exclusion</label>
+              <input class="input" id="excludePattern" style="font-family:monospace;" value="${esc(s.scan_exclude_pattern)}" />
+            </div>
+            <div>
+              <button type="submit" class="btn btn-primary">Enregistrer</button>
+            </div>
+          </form>
+          <div class="field" style="margin-top:16px;">
+            <label for="excludeTest">Tester un nom de fichier</label>
+            <input class="input" id="excludeTest" placeholder="folder.jpg" />
+            <p class="text-muted" id="excludeTestResult" style="font-size:13px;margin:8px 0 0;"></p>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-divider);">
+            <button type="button" class="btn btn-secondary btn-sm" id="previewCleanupBtn">Prévisualiser les fiches déjà scannées à tort</button>
+            <div id="cleanupResult" style="margin-top:10px;"></div>
+          </div>
+        </div>
+        <div class="admin-card">
+          <h2>Synchronisation planifiée</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            La synchronisation se déclenche manuellement (onglet Bibliothèques) ou depuis l'extérieur —
+            une tâche planifiée sur ta box/NAS (cron) qui appelle ces adresses avec le jeton ci-dessous,
+            sans avoir besoin d'une session admin ouverte.
+          </p>
+          <div class="field">
+            <label>Jeton de synchronisation</label>
+            <div class="path-field">
+              <input class="input" id="syncTokenField" value="${esc(s.sync_token)}" readonly onclick="this.select()" style="font-family:monospace;" />
+              <button type="button" class="btn btn-secondary btn-sm" id="regenTokenBtn">Régénérer</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Exemple — tout synchroniser chaque nuit à 3h (crontab de l'hôte)</label>
+            <textarea class="input" readonly rows="2" style="font-family:monospace;font-size:12px;" onclick="this.select()">0 3 * * * curl -s -X POST ${esc(s.site_url)}/api/sync-all -H "X-Sync-Token: ${esc(s.sync_token)}"</textarea>
+          </div>
+        </div>
       `;
+
+      document.getElementById('regenTokenBtn').addEventListener('click', async () => {
+        if (!confirm("Régénérer le jeton ? L'ancien cessera immédiatement de fonctionner — pense à mettre à jour ta tâche planifiée.")) return;
+        try {
+          const res = await api('POST', '/api/settings/regenerate-sync-token');
+          document.getElementById('syncTokenField').value = res.sync_token;
+          showToast('Jeton régénéré.');
+          renderSettingsTab();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('excludeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          await api('PUT', '/api/settings', { scan_exclude_pattern: document.getElementById('excludePattern').value });
+          showToast('Motif enregistré.');
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      let excludeTestTimer = null;
+      document.getElementById('excludeTest').addEventListener('input', () => {
+        clearTimeout(excludeTestTimer);
+        const resultEl = document.getElementById('excludeTestResult');
+        const filename = document.getElementById('excludeTest').value.trim();
+        if (!filename) {
+          resultEl.textContent = '';
+          return;
+        }
+        excludeTestTimer = setTimeout(async () => {
+          try {
+            const res = await api('POST', '/api/settings/test-exclude-pattern', {
+              pattern: document.getElementById('excludePattern').value,
+              filename,
+            });
+            resultEl.textContent = res.matches ? '✓ Correspond — serait ignoré au scan.' : '✗ Ne correspond pas — serait indexé normalement.';
+            resultEl.style.color = res.matches ? '#7be3ab' : '';
+          } catch (err) {
+            resultEl.textContent = 'Erreur : ' + err.message;
+          }
+        }, 300);
+      });
+
+      document.getElementById('previewCleanupBtn').addEventListener('click', async () => {
+        const box = document.getElementById('cleanupResult');
+        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Recherche...</p>';
+        try {
+          const res = await api('GET', '/api/cleanup-excluded');
+          if (!res.matches.length) {
+            box.innerHTML = '<p class="text-muted" style="font-size:13px;">Aucune fiche ne correspond au motif actuel.</p>';
+            return;
+          }
+          box.innerHTML = `
+            <p style="font-size:13px;">${res.matches.length} fiche(s) correspondent au motif actuel :</p>
+            <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
+              ${res.matches.map((m) => `<li>${esc(m.title)} <span class="text-muted">(${esc(m.path)})</span></li>`).join('')}
+            </ul>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmCleanupBtn">Supprimer ces ${res.matches.length} fiche(s)</button>
+          `;
+          document.getElementById('confirmCleanupBtn').addEventListener('click', async () => {
+            if (!confirm(`Supprimer définitivement ces ${res.matches.length} fiche(s) ?`)) return;
+            try {
+              const delRes = await api('POST', '/api/cleanup-excluded');
+              box.innerHTML = `<div class="invite-link-box">${delRes.deleted} fiche(s) supprimée(s).</div>`;
+              showToast('Nettoyage effectué.');
+            } catch (err) {
+              showToast(err.message, true);
+            }
+          });
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        }
+      });
 
       document.getElementById('smtpForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -575,5 +845,4 @@
   }
 
   renderUsersTab();
-  loaded.users = true;
 })();

@@ -1,0 +1,627 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../src/Database.php';
+require_once __DIR__ . '/../../src/Auth.php';
+require_once __DIR__ . '/../../src/Items.php';
+require_once __DIR__ . '/../../src/Tags.php';
+require_once __DIR__ . '/../../src/Series.php';
+require_once __DIR__ . '/../../src/Libraries.php';
+require_once __DIR__ . '/../../src/Paths.php';
+require_once __DIR__ . '/../../src/ComicInfo.php';
+require_once __DIR__ . '/../../src/CoverExtractor.php';
+require_once __DIR__ . '/../../src/Thumbnails.php';
+require_once __DIR__ . '/../../src/Users.php';
+require_once __DIR__ . '/../../src/Settings.php';
+require_once __DIR__ . '/../../src/Mailer.php';
+require_once __DIR__ . '/../../src/LibraryScanner.php';
+require_once __DIR__ . '/../../src/ItemEnrichment.php';
+require_once __DIR__ . '/../../src/ItemPages.php';
+
+header('Content-Type: application/json; charset=utf-8');
+header('X-Content-Type-Options: nosniff');
+// Sync and the metadata/cover backfill can process a meaningful batch of
+// files per request — PHP's usual few-second default isn't enough for that.
+ini_set('max_execution_time', '300');
+
+// Codex is a private personal library, not a public site with an admin
+// section bolted on — every API call (reads included) requires a logged-in
+// session, sent automatically by the browser via the session cookie once
+// signed in through login.php. The one exception is the sync routes,
+// which an external scheduler (a host crontab entry, say) needs to be
+// able to call without ever having a browser session at all — those
+// accept a valid X-Sync-Token header instead, checked below before the
+// blanket session requirement, and nowhere else.
+Auth::bootSession();
+
+$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+$uri = preg_replace('#^/api/?#', '', $uri);
+$segments = array_values(array_filter(explode('/', trim((string) $uri, '/')), fn($s) => $s !== ''));
+$resource = $segments[0] ?? null;
+$rawSecondSegment = $segments[1] ?? null; // kept as a string too — not every resource's 2nd segment is a numeric id (e.g. /api/settings/test-email)
+$id = $rawSecondSegment !== null ? (int) $rawSecondSegment : null;
+$action = $segments[2] ?? null;
+$method = $_SERVER['REQUEST_METHOD'];
+
+$isSyncRoute = ($resource === 'sync-all') || ($resource === 'libraries' && $id !== null && $action === 'sync');
+$syncTokenHeader = $_SERVER['HTTP_X_SYNC_TOKEN'] ?? '';
+$hasValidSyncToken = $isSyncRoute && $syncTokenHeader !== '' && hash_equals(Settings::syncToken(), $syncTokenHeader);
+if (!$hasValidSyncToken) {
+    Auth::requireLoginApi();
+}
+
+function respond(int $code, $data): void
+{
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+function bodyJson(): array
+{
+    $raw = file_get_contents('php://input');
+    $data = json_decode((string) $raw, true);
+    return is_array($data) ? $data : [];
+}
+
+/**
+ * Extracts and saves a cover image for the given item, updating
+ * cover_path in the DB. Returns the web-relative cover path on success,
+ * null if no source image could be found.
+ */
+/** Resolve an array of tag names (creating any that don't exist yet) to their ids. */
+function resolveTagIds(array $names): array
+{
+    $ids = [];
+    foreach ($names as $name) {
+        if (is_string($name) && trim($name) !== '') {
+            $ids[] = Tags::findOrCreate($name);
+        }
+    }
+    return $ids;
+}
+
+/** If the body carries a human-readable "series_name", resolve/create it and
+ *  replace it with the corresponding series_id (null if left blank). */
+function resolveSeriesName(array &$body): void
+{
+    if (array_key_exists('series_name', $body)) {
+        $name = trim((string) $body['series_name']);
+        $body['series_id'] = $name === '' ? null : Series::findOrCreate($name);
+        unset($body['series_name']);
+    }
+}
+
+/**
+ * Returns the list of library ids the logged-in user is allowed to see,
+ * or null if they're an admin (no restriction at all). A 'reader' with
+ * no libraries explicitly assigned sees an empty array — nothing — not
+ * "everything", so newly invited accounts default to seeing nothing until
+ * an admin grants access.
+ */
+function currentUserAllowedLibraries(): ?array
+{
+    $current = Auth::currentUser();
+    if (!$current || $current['role'] === 'admin') {
+        return null;
+    }
+    $user = Users::find($current['id']);
+    return $user['library_ids'] ?? [];
+}
+
+/** Fetches an item and enforces the same library-access rule as the single-item GET route — a 404, not 403, so an out-of-scope item's existence isn't revealed. Ends the request itself on failure. */
+function requireItemAccess(int $id): array
+{
+    $item = Items::find($id);
+    if (!$item) {
+        respond(404, ['error' => 'Item introuvable']);
+    }
+    $allowedLibraryIds = currentUserAllowedLibraries();
+    if ($allowedLibraryIds !== null && !in_array((int) $item['library_id'], $allowedLibraryIds, true)) {
+        respond(404, ['error' => 'Item introuvable']);
+    }
+    return $item;
+}
+
+try {
+    switch ($resource) {
+        case 'items':
+            if ($method === 'GET' && $id === null) {
+                // Listing/browsing the catalog is the one thing admins don't do here —
+                // everything else about /api/items (single-item read for editing,
+                // create, update, delete, metadata/cover extraction) stays open to them.
+                Auth::requireReaderApi();
+                $limit = min(200, max(1, (int) ($_GET['limit'] ?? 60)));
+                $offset = max(0, (int) ($_GET['offset'] ?? 0));
+                $filters = array_filter([
+                    'type' => $_GET['type'] ?? null,
+                    'library_id' => isset($_GET['library_id']) ? (int) $_GET['library_id'] : null,
+                    'series_id' => isset($_GET['series_id']) ? (int) $_GET['series_id'] : null,
+                    'tag_id' => isset($_GET['tag_id']) ? (int) $_GET['tag_id'] : null,
+                    'query' => $_GET['q'] ?? null,
+                ], fn($v) => $v !== null && $v !== '');
+                $allowedLibraryIds = currentUserAllowedLibraries();
+                if ($allowedLibraryIds !== null) {
+                    if (!$allowedLibraryIds) {
+                        respond(200, ['items' => [], 'total' => 0]);
+                    }
+                    $filters['library_ids'] = $allowedLibraryIds;
+                }
+                $sort = (string) ($_GET['sort'] ?? 'title');
+                $dir = (string) ($_GET['dir'] ?? 'ASC');
+                respond(200, Items::search($filters, $sort, $dir, $limit, $offset));
+            }
+            if ($method === 'GET' && $id !== null && $action === null) {
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                $allowedLibraryIds = currentUserAllowedLibraries();
+                if ($allowedLibraryIds !== null && !in_array((int) $item['library_id'], $allowedLibraryIds, true)) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                respond(200, $item);
+            }
+            if ($method === 'POST' && $id === null) {
+                $body = bodyJson();
+                resolveSeriesName($body);
+                $type = (string) ($body['type'] ?? '');
+                $newId = Items::create($type, $body);
+                if (!empty($body['tags']) && is_array($body['tags'])) {
+                    Items::setTags($newId, resolveTagIds($body['tags']));
+                }
+                respond(201, Items::find($newId));
+            }
+            if ($method === 'PUT' && $id !== null && $action === null) {
+                $current = Auth::currentUser();
+                if ($current && $current['role'] === 'reader_basic') {
+                    respond(403, ['error' => "Ce compte n'est pas autorisé à modifier les fiches"]);
+                }
+                $body = bodyJson();
+                resolveSeriesName($body);
+                Items::update($id, $body);
+                if (array_key_exists('tags', $body) && is_array($body['tags'])) {
+                    Items::setTags($id, resolveTagIds($body['tags']));
+                }
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                respond(200, $item);
+            }
+            if ($method === 'DELETE' && $id !== null && $action === null) {
+                Items::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            if ($method === 'GET' && $id !== null && $action === 'download') {
+                $item = requireItemAccess($id);
+                $absPath = Paths::resolve($item['path']);
+                if (!is_file($absPath)) {
+                    respond(404, ['error' => 'Fichier introuvable sur le disque']);
+                }
+                $ext = strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+                $safeTitle = preg_replace('/[\/\\\\:*?"<>|]+/', '_', (string) $item['title']) ?: 'fichier';
+                header('Content-Type: application/octet-stream');
+                header('Content-Length: ' . filesize($absPath));
+                header('Content-Disposition: attachment; filename="' . $safeTitle . '.' . $ext . '"');
+                readfile($absPath);
+                exit;
+            }
+            if ($method === 'GET' && $id !== null && $action === 'pages') {
+                $item = requireItemAccess($id);
+                respond(200, ['count' => ItemPages::count($item)]);
+            }
+            if ($method === 'GET' && $id !== null && $action === 'page') {
+                $item = requireItemAccess($id);
+                $index = max(0, (int) ($_GET['index'] ?? 0));
+                $page = ItemPages::page($item, $index);
+                if ($page === null) {
+                    respond(404, ['error' => 'Page introuvable']);
+                }
+                $mimeTypes = ['jpg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+                header('Content-Type: ' . ($mimeTypes[$page['ext']] ?? 'application/octet-stream'));
+                header('Content-Length: ' . strlen($page['data']));
+                header('Cache-Control: private, max-age=3600'); // pages don't change once an item's been added; the browser can hold onto them
+                echo $page['data'];
+                exit;
+            }
+            if ($id !== null && $action === 'progress') {
+                $item = requireItemAccess($id);
+                $userId = (int) Auth::currentUser()['id'];
+                $pdo = Database::connection();
+
+                if ($method === 'GET') {
+                    $stmt = $pdo->prepare('SELECT position, total_pages, completed_at FROM reading_progress WHERE user_id = ? AND item_id = ?');
+                    $stmt->execute([$userId, $id]);
+                    $row = $stmt->fetch();
+                    respond(200, $row ?: ['position' => null, 'total_pages' => null, 'completed_at' => null]);
+                }
+                if ($method === 'PUT') {
+                    $body = bodyJson();
+                    $existing = (function () use ($pdo, $userId, $id) {
+                        $stmt = $pdo->prepare('SELECT position, total_pages, completed_at FROM reading_progress WHERE user_id = ? AND item_id = ?');
+                        $stmt->execute([$userId, $id]);
+                        return $stmt->fetch() ?: null;
+                    })();
+
+                    $position = array_key_exists('current_page', $body) ? (string) (int) $body['current_page'] : ($existing['position'] ?? null);
+                    $totalPages = array_key_exists('total_pages', $body) ? (int) $body['total_pages'] : ($existing['total_pages'] ?? null);
+                    $completedAt = $existing['completed_at'] ?? null;
+                    if (array_key_exists('completed', $body)) {
+                        $completedAt = $body['completed'] ? date('c') : null;
+                        if ($body['completed'] && $totalPages && !array_key_exists('current_page', $body)) {
+                            $position = (string) max(0, $totalPages - 1);
+                        }
+                    }
+
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO reading_progress (user_id, item_id, position, total_pages, completed_at, updated_at)
+                         VALUES (:uid, :iid, :pos, :total, :completed, :updated)
+                         ON CONFLICT(user_id, item_id) DO UPDATE SET
+                           position = excluded.position, total_pages = excluded.total_pages,
+                           completed_at = excluded.completed_at, updated_at = excluded.updated_at'
+                    );
+                    $stmt->execute([
+                        ':uid' => $userId, ':iid' => $id, ':pos' => $position, ':total' => $totalPages,
+                        ':completed' => $completedAt, ':updated' => date('c'),
+                    ]);
+                    respond(200, ['position' => $position, 'total_pages' => $totalPages, 'completed_at' => $completedAt]);
+                }
+                if ($method === 'DELETE') {
+                    $pdo->prepare('DELETE FROM reading_progress WHERE user_id = ? AND item_id = ?')->execute([$userId, $id]);
+                    respond(200, ['reset' => true]);
+                }
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'libraries':
+            if ($method === 'GET' && $id === null) {
+                respond(200, Libraries::all());
+            }
+            if ($method === 'POST' && $id === null) {
+                Auth::requireAdminApi();
+                $body = bodyJson();
+                $newId = Libraries::create(
+                    (string) ($body['name'] ?? ''),
+                    (string) ($body['path'] ?? ''),
+                    (string) ($body['type'] ?? 'comic')
+                );
+                respond(201, Libraries::find($newId));
+            }
+            if ($method === 'PUT' && $id !== null) {
+                Auth::requireAdminApi();
+                Libraries::update($id, bodyJson());
+                $lib = Libraries::find($id);
+                if (!$lib) {
+                    respond(404, ['error' => 'Bibliothèque introuvable']);
+                }
+                respond(200, $lib);
+            }
+            if ($method === 'DELETE' && $id !== null) {
+                Auth::requireAdminApi();
+                Libraries::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'sync') {
+                Auth::requireAdminOrSyncTokenApi();
+                $lib = Libraries::find($id);
+                if (!$lib) {
+                    respond(404, ['error' => 'Bibliothèque introuvable']);
+                }
+                $result = LibraryScanner::sync($lib);
+                respond(200, $result);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'extract-missing') {
+                Auth::requireAdminOrSyncTokenApi();
+                $lib = Libraries::find($id);
+                if (!$lib) {
+                    respond(404, ['error' => 'Bibliothèque introuvable']);
+                }
+                $limit = min(100, max(1, (int) ($_GET['limit'] ?? 25)));
+                $pdo = Database::connection();
+                $stmt = $pdo->prepare('SELECT * FROM items WHERE library_id = :lib AND metadata_checked_at IS NULL LIMIT :lim');
+                $stmt->bindValue(':lib', $id, PDO::PARAM_INT);
+                $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+                $stmt->execute();
+                $batch = $stmt->fetchAll();
+                foreach ($batch as $item) {
+                    ItemEnrichment::run($item);
+                }
+                $remainingStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ? AND metadata_checked_at IS NULL');
+                $remainingStmt->execute([$id]);
+                respond(200, ['processed' => count($batch), 'remaining' => (int) $remainingStmt->fetchColumn()]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'sync-all':
+            Auth::requireAdminOrSyncTokenApi();
+            if ($method === 'POST') {
+                $results = [];
+                foreach (Libraries::all() as $lib) {
+                    $results[] = ['library' => $lib['name'], 'id' => $lib['id']] + LibraryScanner::sync($lib);
+                }
+                respond(200, ['libraries' => $results]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'cleanup-excluded':
+            Auth::requireAdminApi();
+            $pattern = Settings::scanExcludePattern();
+            $pdo = Database::connection();
+            $matches = [];
+            foreach ($pdo->query('SELECT id, title, path FROM items')->fetchAll() as $row) {
+                $basename = basename((string) $row['path']);
+                if (@preg_match($pattern, $basename) === 1) {
+                    $matches[] = $row;
+                }
+            }
+            if ($method === 'GET') {
+                respond(200, ['pattern' => $pattern, 'matches' => $matches]);
+            }
+            if ($method === 'POST') {
+                foreach ($matches as $row) {
+                    Items::delete((int) $row['id']);
+                }
+                respond(200, ['deleted' => count($matches), 'items' => $matches]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'series':
+            Auth::requireReaderApi();
+            if ($method === 'GET' && $id === null) {
+                respond(200, Series::all());
+            }
+            if ($method === 'GET' && $id !== null) {
+                $s = Series::find($id);
+                if (!$s) {
+                    respond(404, ['error' => 'Série introuvable']);
+                }
+                respond(200, $s);
+            }
+            if ($method === 'POST' && $id === null) {
+                $newId = Series::create(bodyJson());
+                respond(201, Series::find($newId));
+            }
+            if ($method === 'PUT' && $id !== null) {
+                Series::update($id, bodyJson());
+                $s = Series::find($id);
+                if (!$s) {
+                    respond(404, ['error' => 'Série introuvable']);
+                }
+                respond(200, $s);
+            }
+            if ($method === 'DELETE' && $id !== null) {
+                Series::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'tags':
+            Auth::requireReaderApi();
+            if ($method === 'GET' && $id === null) {
+                respond(200, Tags::all());
+            }
+            if ($method === 'POST' && $id === null) {
+                $body = bodyJson();
+                $newId = Tags::findOrCreate((string) ($body['name'] ?? ''));
+                respond(201, ['id' => $newId, 'name' => trim((string) $body['name'])]);
+            }
+            if ($method === 'DELETE' && $id !== null) {
+                Tags::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'users':
+            Auth::requireAdminApi();
+
+            if ($method === 'GET' && $id === null) {
+                respond(200, Users::all());
+            }
+            if ($method === 'GET' && $id !== null) {
+                $u = Users::find($id);
+                if (!$u) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                respond(200, $u);
+            }
+            if ($method === 'POST' && $id === null) {
+                $body = bodyJson();
+                [$user, $token] = Users::invite(
+                    (string) ($body['username'] ?? ''),
+                    (string) ($body['email'] ?? ''),
+                    (string) ($body['role'] ?? 'reader'),
+                    is_array($body['library_ids'] ?? null) ? $body['library_ids'] : [],
+                    !empty($body['mfa_required'])
+                );
+                $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
+                $mailResult = Mailer::send(
+                    (string) $body['email'],
+                    'Ton accès à Codex',
+                    "Bonjour {$user['username']},\n\n"
+                    . "Un accès à la bibliothèque Codex vient de t'être créé.\n"
+                    . "Choisis ton mot de passe ici pour l'activer :\n\n{$inviteUrl}\n\n"
+                    . "Ce lien expire dans 7 jours."
+                );
+                respond(201, [
+                    'user' => $user,
+                    'inviteUrl' => $inviteUrl,
+                    'emailSent' => $mailResult['ok'],
+                    'emailError' => $mailResult['error'],
+                ]);
+            }
+            if ($method === 'PUT' && $id !== null) {
+                $body = bodyJson();
+                if (array_key_exists('role', $body)) {
+                    $current = Users::find($id);
+                    if ($current && $current['role'] === 'admin' && $body['role'] !== 'admin' && Users::adminCount() <= 1) {
+                        respond(400, ['error' => "Impossible de retirer le dernier compte administrateur"]);
+                    }
+                    Users::updateRole($id, (string) $body['role']);
+                }
+                if (array_key_exists('library_ids', $body) && is_array($body['library_ids'])) {
+                    Users::setLibraries($id, $body['library_ids']);
+                }
+                if (array_key_exists('mfa_required', $body)) {
+                    Users::setMfaRequired($id, (bool) $body['mfa_required']);
+                }
+                $u = Users::find($id);
+                if (!$u) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                respond(200, $u);
+            }
+            if ($method === 'DELETE' && $id !== null) {
+                $current = Users::find($id);
+                if (!$current) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                if ($current['role'] === 'admin' && Users::adminCount() <= 1) {
+                    respond(400, ['error' => 'Impossible de supprimer le dernier compte administrateur']);
+                }
+                if (Auth::currentUser()['id'] === $id) {
+                    respond(400, ['error' => 'Impossible de supprimer ton propre compte']);
+                }
+                Users::delete($id);
+                respond(200, ['deleted' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'invites':
+            Auth::requireAdminApi();
+            if ($method === 'POST' && $id !== null && $action === 'resend') {
+                $user = Users::find($id);
+                if (!$user) {
+                    respond(404, ['error' => 'Utilisateur introuvable']);
+                }
+                $token = Users::regenerateInvite($id);
+                $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
+                $mailResult = Mailer::send(
+                    (string) $user['email'],
+                    'Ton accès à Codex',
+                    "Bonjour {$user['username']},\n\nVoici un nouveau lien pour activer ton accès à Codex :\n\n{$inviteUrl}\n\nCe lien expire dans 7 jours."
+                );
+                respond(200, [
+                    'inviteUrl' => $inviteUrl,
+                    'emailSent' => $mailResult['ok'],
+                    'emailError' => $mailResult['error'],
+                ]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'browse-libraries':
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $root = realpath(Paths::libraryRoot());
+                if ($root === false) {
+                    respond(500, [
+                        'error' => "Le dossier libraries/ est introuvable dans le conteneur. "
+                            . "Vérifie qu'il existe sur l'hôte à côté de compose.yml, et que compose.yml "
+                            . "contient bien le montage \"./libraries:/var/www/html/libraries:ro\".",
+                    ]);
+                }
+                $requested = trim((string) ($_GET['path'] ?? ''), '/');
+                // Reject literal ".." segments in the requested path — the UI
+                // itself only ever sends back a path this same endpoint
+                // returned (a listed entry, or a computed parent), so this
+                // only matters against a hand-crafted request. It's checked
+                // on the logical (unresolved) path, not the real one below,
+                // because a symlink *inside* libraries/ is meant to point
+                // anywhere on the host — that's the supported way to expose
+                // an existing collection without duplicating it — so the
+                // resolved real path is deliberately not required to stay
+                // under $root the way the requested one is.
+                if ($requested !== '' && preg_match('#(^|/)\.\.(/|$)#', $requested)) {
+                    respond(400, ['error' => 'Chemin invalide']);
+                }
+                $targetAbs = $requested === '' ? $root : $root . '/' . $requested;
+                if (!is_dir($targetAbs)) {
+                    respond(400, ['error' => 'Chemin invalide ou introuvable']);
+                }
+                $entries = [];
+                foreach (scandir($targetAbs) ?: [] as $item) {
+                    if ($item === '.' || $item === '..' || str_starts_with($item, '.')) {
+                        continue;
+                    }
+                    $itemAbs = $targetAbs . '/' . $item;
+                    if (is_dir($itemAbs)) {
+                        $entries[] = ['name' => $item, 'path' => $requested === '' ? $item : $requested . '/' . $item];
+                    }
+                }
+                usort($entries, fn($a, $b) => strcasecmp($a['name'], $b['name']));
+
+                $parent = null;
+                if ($requested !== '') {
+                    $parentRel = dirname($requested);
+                    $parent = $parentRel === '.' ? '' : $parentRel;
+                }
+                respond(200, ['path' => $requested, 'parent' => $parent, 'entries' => $entries]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'settings':
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $config = Settings::smtpConfig();
+                $config['smtp_password_set'] = !empty($config['smtp_password']);
+                unset($config['smtp_password']);
+                $config['site_url'] = Settings::siteUrl();
+                $config['sync_token'] = Settings::syncToken();
+                $config['scan_exclude_pattern'] = Settings::scanExcludePattern();
+                respond(200, $config);
+            }
+            if ($method === 'PUT') {
+                $body = bodyJson();
+                if (isset($body['site_url'])) {
+                    Settings::set('site_url', trim((string) $body['site_url']) ?: null);
+                    unset($body['site_url']);
+                }
+                if (isset($body['scan_exclude_pattern'])) {
+                    $pattern = (string) $body['scan_exclude_pattern'];
+                    $error = Settings::validateScanExcludePattern($pattern);
+                    if ($error !== null) {
+                        respond(400, ['error' => $error]);
+                    }
+                    Settings::setScanExcludePattern($pattern);
+                    unset($body['scan_exclude_pattern']);
+                }
+                if (isset($body['smtp_password']) && trim((string) $body['smtp_password']) === '') {
+                    unset($body['smtp_password']); // blank = "leave unchanged", not "clear it"
+                }
+                Settings::setSmtpConfig($body);
+                respond(200, ['saved' => true]);
+            }
+            if ($method === 'POST' && $rawSecondSegment === 'test-email') {
+                $body = bodyJson();
+                $to = (string) ($body['to'] ?? '');
+                if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                    respond(400, ['error' => 'Adresse e-mail invalide']);
+                }
+                $result = Mailer::send($to, 'Test Codex', "Ceci est un e-mail de test envoyé depuis Codex.\n\nSi tu le reçois, la configuration SMTP fonctionne.");
+                respond(200, ['sent' => $result['ok'], 'error' => $result['error']]);
+            }
+            if ($method === 'POST' && $rawSecondSegment === 'regenerate-sync-token') {
+                respond(200, ['sync_token' => Settings::regenerateSyncToken()]);
+            }
+            if ($method === 'POST' && $rawSecondSegment === 'test-exclude-pattern') {
+                $body = bodyJson();
+                $pattern = (string) ($body['pattern'] ?? '');
+                $filename = (string) ($body['filename'] ?? '');
+                $error = Settings::validateScanExcludePattern($pattern);
+                if ($error !== null) {
+                    respond(400, ['error' => $error]);
+                }
+                $matches = $pattern !== '' && @preg_match($pattern, $filename) === 1;
+                respond(200, ['matches' => $matches]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        default:
+            respond(404, ['error' => 'Route API inconnue']);
+    }
+} catch (InvalidArgumentException $e) {
+    respond(400, ['error' => $e->getMessage()]);
+} catch (Throwable $e) {
+    respond(500, ['error' => 'Erreur serveur', 'detail' => $e->getMessage()]);
+}

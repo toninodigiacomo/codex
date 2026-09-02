@@ -32,6 +32,7 @@
   ];
 
   const page = document.getElementById('itemPage');
+  const isReadOnly = page.dataset.userRole === 'reader_basic';
   const params = new URLSearchParams(window.location.search);
   const itemId = params.get('id');
 
@@ -46,7 +47,7 @@
     return `
       <div class="field${full ? ' full' : ''}">
         <label for="f-${name}">${esc(label)}</label>
-        <input class="input" id="f-${name}" data-field="${esc(name)}" value="${esc(value)}" />
+        <input class="input" id="f-${name}" data-field="${esc(name)}" value="${esc(value)}" ${isReadOnly ? 'readonly' : ''} />
       </div>`;
   }
 
@@ -98,24 +99,46 @@
         <div class="item-head-info">
           <p class="kicker">${esc(kickerParts.join(' · '))}</p>
           <h1>${esc(item.title)}</h1>
-          <p class="text-muted" id="synopsisDisplay">${esc(item.synopsis || '')}</p>
-          <div class="item-tags-display" id="tagsDisplay">
-            ${(item.tags || []).map((t) => `<span class="tag tag-accent">${esc(t.name)}</span>`).join('')}
+          <div class="reader-toolbar" id="readerToolbar" data-item-id="${item.id}">
+            <a class="reader-btn" href="/api/items/${item.id}/download" title="Télécharger localement" aria-label="Télécharger">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            </a>
+            ${
+              item.format === 'epub'
+                ? ''
+                : `<a class="reader-btn" id="readBtn" href="/reader.php?id=${item.id}" title="Lecture" aria-label="Lecture">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5c2-1 5-1 7 0v14c-2-1-5-1-7 0Z"/><path d="M22 5c-2-1-5-1-7 0v14c2-1 5-1 7 0Z"/></svg>
+                  </a>
+                  <button type="button" class="reader-btn" id="resetProgressBtn" title="Remettre à zéro" aria-label="Remettre à zéro" hidden>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 2.64 6.36"/><path d="M3 21v-6h6"/></svg>
+                  </button>
+                  <button type="button" class="reader-btn" id="markReadBtn" title="Marquer comme lu" aria-label="Lu">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+                  </button>`
+            }
+          </div>
+          ${
+            item.format === 'epub'
+              ? ''
+              : `<div class="reader-progress" id="readerProgress">
+                  <div class="reader-progress-bar"><div class="reader-progress-fill" id="readerProgressFill"></div></div>
+                  <span class="reader-progress-label" id="readerProgressLabel"></span>
+                </div>`
+          }
+          <div class="field item-synopsis-field">
+            <div class="item-synopsis-label-row">
+              <label for="f-synopsis">Résumé</label>
+              <button type="button" class="item-synopsis-expand" id="synopsisExpandBtn" title="Voir le résumé complet" aria-label="Voir le résumé complet">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+              </button>
+            </div>
+            <textarea class="input" id="f-synopsis" form="itemForm" data-field="synopsis" rows="8" ${isReadOnly ? 'readonly' : ''}>${esc(item.synopsis)}</textarea>
           </div>
         </div>
       </div>
-
-      ${
-        item.type === 'comic'
-          ? `<div class="extract-row">
-              <button type="button" class="btn btn-secondary" id="extractBtn">Extraire les métadonnées + la couverture du fichier .cbz</button>
-              <span class="extract-status" id="extractStatus"></span>
-            </div>`
-          : `<div class="extract-row">
-              <button type="button" class="btn btn-secondary" id="extractCoverBtn">Extraire la couverture</button>
-              <span class="extract-status" id="extractStatus"></span>
-            </div>`
-      }
+      <div class="item-tags-display" id="tagsDisplay">
+        ${(item.tags || []).map((t) => `<span class="tag tag-accent">${esc(t.name)}</span>`).join('')}
+      </div>
 
       <form id="itemForm">
         <div class="form-section">
@@ -124,77 +147,42 @@
             ${fieldInput('title', 'Titre', item.title, true)}
             <div class="field">
               <label for="f-series_name">Série</label>
-              <input class="input" id="f-series_name" data-field="series_name" value="${esc(item.series_name)}" placeholder="Laisser vide si aucune" />
+              <input class="input" id="f-series_name" data-field="series_name" value="${esc(item.series_name)}" placeholder="Laisser vide si aucune" ${isReadOnly ? 'readonly' : ''} />
             </div>
             <div class="field">
               <label for="f-issue_number">N° dans la série</label>
-              <input class="input" id="f-issue_number" data-field="issue_number" value="${esc(item.issue_number)}" />
+              <input class="input" id="f-issue_number" data-field="issue_number" value="${esc(item.issue_number)}" ${isReadOnly ? 'readonly' : ''} />
             </div>
             ${fieldInput('publisher', 'Éditeur', item.publisher)}
             <div class="field full">
-              <label for="f-synopsis">Résumé</label>
-              <textarea class="input" id="f-synopsis" data-field="synopsis" rows="4">${esc(item.synopsis)}</textarea>
-            </div>
-            <div class="field full">
               <label for="f-tags">Tags (séparés par des virgules)</label>
-              <input class="input" id="f-tags" value="${esc((item.tags || []).map((t) => t.name).join(', '))}" />
+              <input class="input" id="f-tags" value="${esc((item.tags || []).map((t) => t.name).join(', '))}" ${isReadOnly ? 'readonly' : ''} />
             </div>
           </div>
         </div>
 
         ${typeFields}
 
-        <div class="item-actions">
-          <button type="submit" class="btn btn-primary">Enregistrer</button>
-          <span class="extract-status" id="saveStatus"></span>
-        </div>
+        ${
+          isReadOnly
+            ? ''
+            : `<div class="item-actions">
+                <button type="submit" class="btn btn-primary">Enregistrer</button>
+                <span class="extract-status" id="saveStatus"></span>
+              </div>`
+        }
       </form>
     `;
 
-    const extractBtn = document.getElementById('extractBtn');
-    if (extractBtn) {
-      extractBtn.addEventListener('click', async () => {
-        const status = document.getElementById('extractStatus');
-        extractBtn.disabled = true;
-        status.textContent = 'Lecture du fichier...';
-        try {
-          const res = await fetchJson(`/api/items/${itemId}/extract-metadata`, { method: 'POST' });
-          const parts = [];
-          parts.push(res.extracted ? 'métadonnées trouvées' : 'aucun ComicInfo.xml trouvé');
-          parts.push(res.coverExtracted ? 'couverture extraite' : 'pas de couverture extraite');
-          status.textContent = parts.join(', ') + '.';
-          render(res.item);
-        } catch (err) {
-          status.textContent = `Erreur : ${err.message}`;
-          extractBtn.disabled = false;
-        }
-      });
-    }
-
-    const extractCoverBtn = document.getElementById('extractCoverBtn');
-    if (extractCoverBtn) {
-      extractCoverBtn.addEventListener('click', async () => {
-        const status = document.getElementById('extractStatus');
-        extractCoverBtn.disabled = true;
-        status.textContent = 'Lecture du fichier...';
-        try {
-          const res = await fetchJson(`/api/items/${itemId}/extract-cover`, { method: 'POST' });
-          if (res.extracted) {
-            status.textContent = 'Couverture extraite.';
-            render(res.item);
-          } else {
-            status.textContent = res.reason || 'Aucune image trouvée dans ce fichier.';
-            extractCoverBtn.disabled = false;
-          }
-        } catch (err) {
-          status.textContent = `Erreur : ${err.message}`;
-          extractCoverBtn.disabled = false;
-        }
-      });
-    }
+    document.getElementById('synopsisExpandBtn').addEventListener('click', () => {
+      openSynopsisDialog(item.title, document.getElementById('f-synopsis').value);
+    });
 
     document.getElementById('itemForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (isReadOnly) {
+        return; // no save button to click here, but a stray Enter keypress in a field shouldn't attempt one either
+      }
       const saveStatus = document.getElementById('saveStatus');
       const payload = {};
       document.querySelectorAll('[data-field]').forEach((el) => {
@@ -225,6 +213,114 @@
         saveStatus.textContent = `Erreur : ${err.message}`;
       }
     });
+
+    setupReaderToolbar(item.id);
+  }
+
+  function openSynopsisDialog(title, synopsis) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'dialog-backdrop';
+    backdrop.innerHTML = `
+      <div class="dialog synopsis-dialog">
+        <div class="dialog-title">${esc(title)}</div>
+        <div class="dialog-body synopsis-dialog-body">${esc(synopsis || '(aucun résumé)')}</div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="synopsisDialogClose">Fermer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+    document.getElementById('synopsisDialogClose').addEventListener('click', () => backdrop.remove());
+    document.addEventListener('keydown', function onEsc(e) {
+      if (e.key === 'Escape') { backdrop.remove(); document.removeEventListener('keydown', onEsc); }
+    });
+  }
+
+  async function setupReaderToolbar(id) {
+    const readBtn = document.getElementById('readBtn');
+    if (!readBtn) {
+      return; // EPUB (or any format without reader buttons in the template) — download only, nothing to wire up
+    }
+    const resetBtn = document.getElementById('resetProgressBtn');
+    const markReadBtn = document.getElementById('markReadBtn');
+    const progressFill = document.getElementById('readerProgressFill');
+    const progressLabel = document.getElementById('readerProgressLabel');
+
+    try {
+      const { count } = await fetchJson(`/api/items/${id}/pages`);
+      if (count === 0) {
+        readBtn.setAttribute('aria-disabled', 'true');
+        readBtn.classList.add('reader-btn-disabled');
+        readBtn.removeAttribute('href');
+        readBtn.title = 'Lecture non disponible pour ce format';
+      }
+    } catch {
+      // if we can't even tell whether it's readable, leave the button as a normal link — better an attempt that fails than a falsely-disabled button
+    }
+
+    async function refreshProgress() {
+      let progress;
+      try {
+        progress = await fetchJson(`/api/items/${id}/progress`);
+      } catch {
+        return;
+      }
+      const total = progress.total_pages;
+      const current = progress.position !== null ? Number(progress.position) : null;
+      const isComplete = !!progress.completed_at;
+      const hasProgress = current !== null || isComplete;
+
+      resetBtn.hidden = !hasProgress;
+      markReadBtn.classList.toggle('reader-btn-active', isComplete);
+      markReadBtn.title = isComplete ? 'Marqué comme lu — cliquer pour annuler' : 'Marquer comme lu';
+
+      // The bar itself always stays in the layout — even at 0%, reserving
+      // its space — so a reset doesn't make the page jump as if a whole
+      // row had disappeared.
+      if (hasProgress && total) {
+        const pct = Math.round(((isComplete ? total - 1 : current) + 1) / total * 100);
+        progressFill.style.width = pct + '%';
+        progressLabel.textContent = isComplete ? 'Lu' : `Page ${current + 1} / ${total} (${pct}%)`;
+      } else {
+        progressFill.style.width = '0%';
+        progressLabel.textContent = 'Non commencé';
+      }
+    }
+
+    resetBtn.addEventListener('click', async () => {
+      try {
+        await fetchJson(`/api/items/${id}/progress`, { method: 'DELETE' });
+        await refreshProgress();
+      } catch (err) {
+        showReaderToast(err.message);
+      }
+    });
+
+    markReadBtn.addEventListener('click', async () => {
+      let currentlyComplete = false;
+      try {
+        const progress = await fetchJson(`/api/items/${id}/progress`);
+        currentlyComplete = !!progress.completed_at;
+        await fetchJson(`/api/items/${id}/progress`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completed: !currentlyComplete }),
+        });
+        await refreshProgress();
+      } catch (err) {
+        showReaderToast(err.message);
+      }
+    });
+
+    refreshProgress();
+  }
+
+  function showReaderToast(message) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
   }
 
   if (!itemId) {

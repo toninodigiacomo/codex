@@ -26,6 +26,7 @@ services:
       # Add one line per external source, matching the folder name you
       # want it to appear as under libraries/ in the admin's path picker:
       - /mnt/nvme0n1/docker/ubooquity/comics:/var/www/html/libraries/comics:ro
+      - /mnt/nvme0n1/docker/ubooquity/books:/var/www/html/libraries/books:ro
 
       - /mnt/nvme0n1/docker/codex/docker/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
       - /mnt/nvme0n1/docker/codex/docker/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro

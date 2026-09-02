@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Totp.php';
 
 Auth::bootSession();
@@ -44,7 +45,7 @@ $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Authentification à deux facteurs requise — Codex</title>
-<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
   .setup-wrap { max-width: 460px; margin: 0 auto; padding: 48px 20px 64px; }

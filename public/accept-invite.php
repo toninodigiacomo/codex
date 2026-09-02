@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Users.php';
 require_once __DIR__ . '/../src/Totp.php';
 
@@ -15,7 +16,7 @@ if (!$invitedUser) {
     http_response_code(410);
     ?>
     <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Invitation invalide — Codex</title>
-    <link rel="stylesheet" href="css/style.css"></head><body style="max-width:480px;margin:60px auto;padding:0 20px;">
+    <link rel="stylesheet" href="<?= asset('css/style.css') ?>"></head><body style="max-width:480px;margin:60px auto;padding:0 20px;">
     <h1>Lien invalide ou expiré</h1>
     <p class="text-muted">Ce lien d'invitation n'existe pas, a déjà été utilisé, ou a expiré (7 jours). Demande à l'administrateur de t'en renvoyer un.</p>
     </body></html>
@@ -63,7 +64,7 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Bienvenue — Codex</title>
-<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
   .setup-wrap { max-width: 480px; margin: 0 auto; padding: 48px 20px 64px; }
