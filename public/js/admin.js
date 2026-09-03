@@ -684,6 +684,25 @@
           </form>
         </div>
         <div class="admin-card">
+          <h2>Navigation par éditeur</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Pour une bibliothèque rangée en <code>Éditeur/Collection/Tome...</code>, ajoute une flèche à côté
+            de l'onglet correspondant. Elle ouvre d'abord les bibliothèques de ce type (une tuile par bibliothèque,
+            sautée directement s'il n'y en a qu'une), puis les éditeurs de la bibliothèque choisie, puis ses
+            collections — avec, à côté des collections, les tomes posés directement dans le dossier de l'éditeur.
+            Le nom de l'éditeur/de la collection est déduit du nom des dossiers ; leur vignette utilise
+            <code>folder.jpg</code> si présent dans le dossier (sinon la couverture du premier objet trouvé).
+          </p>
+          <label class="mfa-force-toggle">
+            <input type="checkbox" id="showPublishersToggle" ${s.show_publishers ? 'checked' : ''} />
+            Afficher la navigation par éditeur
+          </label>
+          <label class="mfa-force-toggle">
+            <input type="checkbox" id="showEmptyLibrariesNavToggle" ${s.show_empty_libraries_nav ? 'checked' : ''} />
+            Afficher aussi les bibliothèques sans structure éditeur/collection dans cette liste
+          </label>
+        </div>
+        <div class="admin-card">
           <h2>Filtre de synchronisation</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
             Expression régulière (PCRE) appliquée au nom de chaque fichier/dossier pendant une synchronisation —
@@ -740,6 +759,25 @@
           showToast('Jeton régénéré.');
           renderSettingsTab();
         } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('showPublishersToggle').addEventListener('change', async (e) => {
+        try {
+          await api('PUT', '/api/settings', { show_publishers: e.target.checked });
+          showToast('Enregistré.');
+        } catch (err) {
+          e.target.checked = !e.target.checked;
+          showToast(err.message, true);
+        }
+      });
+      document.getElementById('showEmptyLibrariesNavToggle').addEventListener('change', async (e) => {
+        try {
+          await api('PUT', '/api/settings', { show_empty_libraries_nav: e.target.checked });
+          showToast('Enregistré.');
+        } catch (err) {
+          e.target.checked = !e.target.checked;
           showToast(err.message, true);
         }
       });

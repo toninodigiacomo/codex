@@ -123,6 +123,7 @@ figcaption { font-size: 11px; margin-top: var(--space-1); color: color-mix(in sr
   transition: transform 0.1s ease, background 0.15s ease;
 }
 .btn svg { display: block; }
+.btn[hidden] { display: none; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--color-accent); color: #fff; }
 .btn-primary:hover { background: var(--color-accent-400); }

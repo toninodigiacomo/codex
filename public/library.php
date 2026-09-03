@@ -93,6 +93,7 @@ Auth::requireReaderPage();
 
       <div id="browseView" hidden>
         <div class="main-toolbar">
+          <button type="button" class="btn btn-ghost" id="browseBackBtn" hidden>← Retour</button>
           <div class="active-filters" id="activeFilters"></div>
           <select class="input" id="sortSelect" style="width:auto;">
             <option value="added_at:DESC">Ajouts récents</option>
@@ -106,6 +107,16 @@ Auth::requireReaderPage();
 
         <div class="item-grid" id="itemGrid"></div>
         <p class="text-muted" id="emptyState" hidden>Aucun résultat. La bibliothèque est-elle déjà indexée ?</p>
+        <div class="pagination" id="pagination" hidden></div>
+      </div>
+
+      <div id="groupView" hidden>
+        <div class="main-toolbar">
+          <button type="button" class="btn btn-ghost" id="groupBackBtn"></button>
+          <h2 class="group-view-title" id="groupViewTitle"></h2>
+        </div>
+        <div class="item-grid" id="groupGrid"></div>
+        <p class="text-muted" id="groupEmptyState" hidden>Aucun résultat.</p>
       </div>
     </main>
   </div>

@@ -9,16 +9,27 @@
   const HOME_SHELF_TYPES = ['comic', 'ebook', 'magazine', 'other'];
   const HOME_SHELF_TYPES_FETCH_LIMIT = 60; // a full scrollable shelf's worth, per the "let's say 60" request
 
+  const BROWSE_PAGE_SIZE = 120;
+
   const state = {
-    mode: 'home', // 'home' | 'browse'
+    mode: 'home', // 'home' | 'browse' | 'group'
     type: '',
-    library_id: null,
+    library_id: null, // sidebar "Bibliothèques" filter — separate from the éditeur-flow scoping below
     series_id: null,
     tag_id: null,
     q: '',
     sort: 'added_at',
     dir: 'DESC',
+    page: 1, // 1-indexed, browse mode only — reset to 1 whenever a filter/search/sort changes
+    groupLevel: null, // 'library' | 'publisher' | 'collection' — only meaningful when mode === 'group'
+    groupLibraryId: null, // the single library the éditeur flow is scoped to, once past the library tile grid
+    groupLibraryName: null,
+    groupSkippedLibraryLevel: false, // true when there was only one library of the type, so the library grid was never shown
+    groupPublisher: null, // the publisher a collection-level group view, or a filtered browse, is scoped to
+    groupCollection: null, // the collection a filtered browse is scoped to
   };
+
+  let displaySettings = { show_publishers: false };
 
   let libraries = [];
   let series = [];
@@ -27,6 +38,11 @@
 
   const homeView = document.getElementById('homeView');
   const browseView = document.getElementById('browseView');
+  const groupView = document.getElementById('groupView');
+  const groupGrid = document.getElementById('groupGrid');
+  const groupEmptyState = document.getElementById('groupEmptyState');
+  const groupViewTitle = document.getElementById('groupViewTitle');
+  const groupBackBtn = document.getElementById('groupBackBtn');
   const typeTabs = document.getElementById('typeTabs');
   const homeBtn = document.getElementById('homeBtn');
   const userMenu = document.getElementById('userMenu');
@@ -42,6 +58,9 @@
   const tagList = document.getElementById('tagList');
   const searchInput = document.getElementById('searchInput');
   const sortSelect = document.getElementById('sortSelect');
+  const browseBackBtn = document.getElementById('browseBackBtn');
+  const pagination = document.getElementById('pagination');
+  browseBackBtn.addEventListener('click', goBackFromGroupFlow);
 
   async function fetchJson(url) {
     const res = await fetch(url);
@@ -157,9 +176,9 @@
   // Browse mode — search / filters / sort
   // ============================================================
   function switchToBrowseMode() {
-    if (state.mode === 'browse') return;
     state.mode = 'browse';
     homeView.hidden = true;
+    groupView.hidden = true;
     browseView.hidden = false;
   }
 
@@ -202,6 +221,7 @@
     activeFilters.querySelectorAll('[data-clear]').forEach((el) => {
       el.addEventListener('click', () => {
         state[el.dataset.clear] = null;
+        state.page = 1;
         loadItems();
         syncSidebarActiveStates();
       });
@@ -224,6 +244,7 @@
         const key = el.dataset.filterKey;
         const value = Number(el.dataset.filterValue);
         state[key] = state[key] === value ? null : value;
+        state.page = 1;
         loadItems();
         syncSidebarActiveStates();
       });
@@ -234,12 +255,16 @@
     const params = new URLSearchParams();
     if (state.type) params.set('type', state.type);
     if (state.library_id) params.set('library_id', state.library_id);
+    else if (state.groupLibraryId) params.set('library_id', state.groupLibraryId);
     if (state.series_id) params.set('series_id', state.series_id);
     if (state.tag_id) params.set('tag_id', state.tag_id);
     if (state.q) params.set('q', state.q);
+    if (state.groupPublisher) params.set('publisher', state.groupPublisher);
+    if (state.groupCollection) params.set('collection', state.groupCollection);
     params.set('sort', state.sort);
     params.set('dir', state.dir);
-    params.set('limit', '120');
+    params.set('limit', String(BROWSE_PAGE_SIZE));
+    params.set('offset', String((state.page - 1) * BROWSE_PAGE_SIZE));
 
     try {
       const data = await fetchJson(`/api/items?${params.toString()}`);
@@ -248,12 +273,44 @@
       resultCount.textContent = `${data.total} résultat${data.total === 1 ? '' : 's'}`;
       emptyState.hidden = data.items.length !== 0;
       grid.hidden = data.items.length === 0;
+      renderPagination(data.total);
+      browseBackBtn.hidden = !(state.groupPublisher || state.groupCollection);
+      browseBackBtn.textContent = state.groupCollection ? `← ${state.groupCollection}` : (state.groupPublisher ? `← ${state.groupPublisher}` : '← Retour');
     } catch (err) {
       grid.innerHTML = '';
       resultCount.textContent = '';
       emptyState.hidden = false;
       emptyState.textContent = `Impossible de charger la bibliothèque (${err.message}).`;
+      pagination.hidden = true;
     }
+  }
+
+  /** 12-13k BD ne tiennent jamais dans une seule page — « première/précédent/n sur N/suivant/dernière ». */
+  function renderPagination(total) {
+    const totalPages = Math.max(1, Math.ceil(total / BROWSE_PAGE_SIZE));
+    if (totalPages <= 1) {
+      pagination.hidden = true;
+      pagination.innerHTML = '';
+      return;
+    }
+    pagination.hidden = false;
+    pagination.innerHTML = `
+      <button type="button" class="btn btn-secondary" data-page-action="first" ${state.page <= 1 ? 'disabled' : ''} aria-label="Première page">«</button>
+      <button type="button" class="btn btn-secondary" data-page-action="prev" ${state.page <= 1 ? 'disabled' : ''} aria-label="Page précédente">‹</button>
+      <span class="page-indicator">${state.page} / ${totalPages}</span>
+      <button type="button" class="btn btn-secondary" data-page-action="next" ${state.page >= totalPages ? 'disabled' : ''} aria-label="Page suivante">›</button>
+      <button type="button" class="btn btn-secondary" data-page-action="last" ${state.page >= totalPages ? 'disabled' : ''} aria-label="Dernière page">»</button>
+    `;
+    pagination.querySelectorAll('[data-page-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.pageAction;
+        if (action === 'first') state.page = 1;
+        else if (action === 'prev') state.page = Math.max(1, state.page - 1);
+        else if (action === 'next') state.page = Math.min(totalPages, state.page + 1);
+        else if (action === 'last') state.page = totalPages;
+        loadItems();
+      });
+    });
   }
 
   const NAV_TYPE_LABELS = { comic: 'Bande Dessinée', ebook: 'Ebooks', magazine: 'Magazines', other: 'Fichiers' };
@@ -272,18 +329,188 @@
       .join('');
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => {
       input.addEventListener('change', () => {
-        switchToBrowseMode();
-        state.type = input.value;
-        loadItems();
+        const type = input.value;
+        if (displaySettings.show_publishers) {
+          startGroupFlow(type);
+        } else {
+          switchToBrowseMode();
+          state.type = type;
+          state.page = 1;
+          state.groupLibraryId = null;
+          state.groupPublisher = null;
+          state.groupCollection = null;
+          loadItems();
+        }
       });
     });
   }
 
+  function groupTileHtml(g, id) {
+    const idAttr = id !== undefined ? ` data-group-tile-id="${esc(id)}"` : '';
+    return `
+      <div class="item-card" data-group-tile="${esc(g.name)}"${idAttr} style="cursor:pointer;">
+        <div class="item-cover">
+          ${g.thumbnail ? `<img src="${esc(g.thumbnail)}" alt="" loading="lazy" />` : `<div class="fallback">${esc(g.name)}</div>`}
+          <span class="group-count-badge">${g.count}</span>
+        </div>
+        <div class="item-title">${esc(g.name)}</div>
+      </div>`;
+  }
+
+  function showGroupView(title) {
+    typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = input.value === state.type; });
+    homeView.hidden = true;
+    browseView.hidden = true;
+    groupView.hidden = false;
+    groupViewTitle.textContent = title;
+    groupBackBtn.textContent = '← Retour';
+    groupGrid.innerHTML = '';
+    groupEmptyState.hidden = true;
+  }
+
+  /** Arrow click: skips straight to the éditeur grid when the type has only one library, per admin's confirmed behaviour. */
+  async function startGroupFlow(type) {
+    try {
+      const libs = await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`);
+      if (libs.length === 1) {
+        openPublisherLevel(type, libs[0].id, libs[0].name, true);
+      } else {
+        openLibraryLevel(type, libs);
+      }
+    } catch (err) {
+      openLibraryLevel(type, []);
+    }
+  }
+
+  /** First tile grid: one tile per library of $type (never merged, even when two libraries share a type). */
+  async function openLibraryLevel(type, preloaded) {
+    state.mode = 'group';
+    state.type = type;
+    state.groupLevel = 'library';
+    state.groupLibraryId = null;
+    state.groupLibraryName = null;
+    state.groupSkippedLibraryLevel = false;
+    state.groupPublisher = null;
+    state.groupCollection = null;
+    showGroupView('Bibliothèques');
+
+    try {
+      const groups = preloaded || (await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`));
+      if (!groups.length) {
+        groupEmptyState.hidden = false;
+        return;
+      }
+      groupGrid.innerHTML = groups.map((g) => groupTileHtml(g, g.id)).join('');
+      groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
+        tile.addEventListener('click', () => {
+          openPublisherLevel(type, Number(tile.dataset.groupTileId), tile.dataset.groupTile, false);
+        });
+      });
+    } catch (err) {
+      groupEmptyState.hidden = false;
+      groupEmptyState.textContent = `Erreur : ${err.message}`;
+    }
+  }
+
+  /** Second tile grid: éditeurs within one specific library. */
+  async function openPublisherLevel(type, libraryId, libraryName, skippedLibraryLevel) {
+    state.mode = 'group';
+    state.type = type;
+    state.groupLevel = 'publisher';
+    state.groupLibraryId = libraryId;
+    state.groupLibraryName = libraryName;
+    state.groupSkippedLibraryLevel = skippedLibraryLevel;
+    state.groupPublisher = null;
+    state.groupCollection = null;
+    showGroupView(`Éditeurs — ${libraryName}`);
+
+    try {
+      const groups = await fetchJson(`/api/publishers?type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}`);
+      if (!groups.length) {
+        groupEmptyState.hidden = false;
+        return;
+      }
+      groupGrid.innerHTML = groups.map((g) => groupTileHtml(g)).join('');
+      groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
+        tile.addEventListener('click', () => openCollectionLevel(type, tile.dataset.groupTile));
+      });
+    } catch (err) {
+      groupEmptyState.hidden = false;
+      groupEmptyState.textContent = `Erreur : ${err.message}`;
+    }
+  }
+
+  /** Third grid: an éditeur's collections, plus the standalone tomes sitting directly in its folder. */
+  async function openCollectionLevel(type, publisher) {
+    state.mode = 'group';
+    state.type = type;
+    state.groupLevel = 'collection';
+    state.groupPublisher = publisher;
+    state.groupCollection = null;
+    showGroupView(`Collections — ${publisher}`);
+
+    try {
+      const params = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(state.groupLibraryId)}&publisher=${encodeURIComponent(publisher)}`;
+      const [collections, standalone] = await Promise.all([
+        fetchJson(`/api/collections?${params}`),
+        fetchJson(`/api/items?${params}&no_collection=1&limit=200`),
+      ]);
+      if (!collections.length && !standalone.items.length) {
+        groupEmptyState.hidden = false;
+        return;
+      }
+      groupGrid.innerHTML = collections.map((g) => groupTileHtml(g)).join('') + standalone.items.map(itemCardHtml).join('');
+      groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
+        tile.addEventListener('click', () => openFilteredBrowse(type, state.groupLibraryId, publisher, tile.dataset.groupTile));
+      });
+    } catch (err) {
+      groupEmptyState.hidden = false;
+      groupEmptyState.textContent = `Erreur : ${err.message}`;
+    }
+  }
+
+  function openFilteredBrowse(type, libraryId, publisher, collection) {
+    switchToBrowseMode();
+    state.type = type;
+    state.page = 1;
+    state.groupLibraryId = libraryId;
+    state.groupPublisher = publisher;
+    state.groupCollection = collection;
+    typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = input.value === type; });
+    loadItems();
+  }
+
+  /** Where the back arrow goes depends on how the current screen was reached. */
+  function goBackFromGroupFlow() {
+    if (state.mode === 'browse' && state.groupCollection) {
+      openCollectionLevel(state.type, state.groupPublisher);
+    } else if (state.mode === 'group' && state.groupLevel === 'collection') {
+      openPublisherLevel(state.type, state.groupLibraryId, state.groupLibraryName, state.groupSkippedLibraryLevel);
+    } else if (state.mode === 'group' && state.groupLevel === 'publisher') {
+      if (state.groupSkippedLibraryLevel) {
+        switchToHomeMode();
+      } else {
+        openLibraryLevel(state.type);
+      }
+    } else {
+      switchToHomeMode();
+    }
+  }
+
+  groupBackBtn.addEventListener('click', goBackFromGroupFlow);
+
   function switchToHomeMode() {
     state.mode = 'home';
     state.type = '';
+    state.page = 1;
+    state.groupLibraryId = null;
+    state.groupLibraryName = null;
+    state.groupSkippedLibraryLevel = false;
+    state.groupPublisher = null;
+    state.groupCollection = null;
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
     browseView.hidden = true;
+    groupView.hidden = true;
     homeView.hidden = false;
     loadHome();
   }
@@ -311,6 +538,7 @@
     searchTimer = setTimeout(() => {
       switchToBrowseMode();
       state.q = q;
+      state.page = 1;
       loadItems();
     }, 250);
   });
@@ -319,6 +547,7 @@
     const [sort, dir] = sortSelect.value.split(':');
     state.sort = sort;
     state.dir = dir;
+    state.page = 1;
     loadItems();
   });
 
@@ -339,10 +568,12 @@
     fetchJson('/api/libraries').catch(() => []),
     fetchJson('/api/series').catch(() => []),
     fetchJson('/api/tags').catch(() => []),
-  ]).then(([libs, ser, tg]) => {
+    fetchJson('/api/display-settings').catch(() => ({ show_publishers: false })),
+  ]).then(([libs, ser, tg, disp]) => {
     libraries = libs;
     series = ser;
     tags = tg;
+    displaySettings = disp;
     renderTypeTabs();
     syncSidebarActiveStates();
   });

@@ -123,4 +123,39 @@ final class Settings
         $pattern = trim($pattern);
         self::set('scan_exclude_pattern', $pattern === '' ? null : $pattern);
     }
+
+    /**
+     * Whether the reader nav exposes browsing by Bibliothèque/Éditeur/Collection —
+     * derived from folder structure (Éditeur/Collection/Tome...), not
+     * metadata. Global, not per-library, matching every other setting
+     * in this file — a library-by-library version would need its own
+     * UI and storage shape for comparatively little gain, since a
+     * reader only ever sees this through the type-level nav tab anyway,
+     * already spanning every library that shares that type.
+     */
+    public static function showPublishers(): bool
+    {
+        return self::get('show_publishers') === '1';
+    }
+
+    public static function setShowPublishers(bool $value): void
+    {
+        self::set('show_publishers', $value ? '1' : '0');
+    }
+
+    /**
+     * Within the éditeur nav above: whether a type's library grid also
+     * lists libraries that have no Éditeur/Collection structure at all
+     * (dead-end tiles) or hides them. Off by default — an empty tile
+     * that leads nowhere isn't useful until an admin opts in.
+     */
+    public static function showEmptyLibrariesInNav(): bool
+    {
+        return self::get('show_empty_libraries_nav') === '1';
+    }
+
+    public static function setShowEmptyLibrariesInNav(bool $value): void
+    {
+        self::set('show_empty_libraries_nav', $value ? '1' : '0');
+    }
 }

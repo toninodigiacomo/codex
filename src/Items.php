@@ -254,6 +254,19 @@ final class Items
             $where[] = '(items.title LIKE :q OR items.publisher LIKE :q)';
             $params[':q'] = '%' . $filters['query'] . '%';
         }
+        if (isset($filters['ids']) && is_array($filters['ids'])) {
+            if (!$filters['ids']) {
+                $where[] = '0 = 1'; // an empty explicit id list means "match nothing", not "no filter"
+            } else {
+                $placeholders = [];
+                foreach (array_values($filters['ids']) as $i => $itemId) {
+                    $key = ":iid$i";
+                    $placeholders[] = $key;
+                    $params[$key] = (int) $itemId;
+                }
+                $where[] = 'items.id IN (' . implode(',', $placeholders) . ')';
+            }
+        }
         return [$where, $params];
     }
 }

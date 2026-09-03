@@ -475,6 +475,56 @@ connection, so a second request just waits its turn instead of racing,
 and re-checks the table once unblocked — correctly finding nothing left
 to do if another request already finished.
 
+## Browsing by publisher / collection
+
+For a library laid out on disk as `Éditeur/Collection/Tome...`, two
+Réglages toggles (`show_publishers`, `show_collections`, global —
+not per-library, since a reader only ever meets this through a
+type-level nav tab, already spanning every library sharing that type)
+add a small arrow next to that type's tab. What it opens depends on
+which are on — this is deliberately state-driven rather than a fixed
+hierarchy:
+
+- Only publishers on: arrow → publisher grid → click one → every item
+  under it, any depth, flattened (no collection-level stop).
+- Only collections on: arrow → every collection folder across every
+  publisher, flat, no publisher grouping → click one → its items.
+- Both on: arrow → publishers → click one → *its* collections only →
+  click one → its items.
+
+`src/LibraryGroups.php` derives all of this from `items.path` alone,
+relative to whichever library each item belongs to — the first folder
+segment is the publisher, the second (when there is one) is the
+collection. Nothing is stored: a library re-synced with folders
+renamed just reflects that on the next page load. Matching an item to
+a publisher/collection is done in PHP over each item's path segments,
+not a SQL `LIKE` pattern — a collection reached from the flat,
+publisher-less listing has no publisher to anchor a path prefix on, and
+a wildcard-anywhere pattern risked a false match if the collection's
+name happened to appear as a substring elsewhere in some unrelated
+item's path.
+
+A folder's thumbnail reuses the exact convention `scan_exclude_pattern`
+already exists to filter out — `folder.jpg`/`header.jpg`/etc. sitting
+directly in that folder, Ubooquity-style, are exactly the per-folder
+cover art to show here, discovered live off disk (not cached) when a
+publisher/collection is listed. No sidecar image → falls back to the
+cover of that folder's first item (naturally sorted). Serving that
+sidecar image needed a new endpoint, `GET /api/folder-thumbnail`,
+since library content is mounted read-only outside `public/` and can't
+be linked to directly: it re-checks the requested path actually falls
+under a library the requesting user can see (matching every other
+access check in this app) before reading the file, on top of rejecting
+`..` segments and any extension that isn't a plain image — a direct,
+crafted request is never taken purely on trust just because a client
+CAN construct arbitrary query strings.
+
+`GET /api/display-settings` exists because `GET /api/settings` is
+admin-only (it carries the SMTP password) — readers need to know
+whether these two toggles are on to decide whether to show the arrow at
+all, so that one pair of booleans gets its own small reader-reachable
+route rather than loosening the real settings endpoint.
+
 ## Three-tier user roles
 
 `users.role` is one of `admin`, `reader` (branded "Utilisateur avancé"

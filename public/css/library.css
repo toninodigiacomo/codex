@@ -55,6 +55,7 @@
 
 .main-area { padding: var(--space-4) var(--space-6); min-width: 0; }
 .main-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-2); }
+.group-view-title { font-size: 18px; font-family: var(--font-heading); font-weight: 700; margin: 0; }
 .active-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
 .active-filters .tag { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .active-filters .tag .x { opacity: 0.7; }
@@ -107,6 +108,19 @@
   padding: 3px 8px; border-radius: 999px; background: rgba(14,14,16,0.75); color: #fff;
   backdrop-filter: blur(2px);
 }
+.item-cover .group-count-badge {
+  position: absolute; bottom: 8px; right: 8px; font-family: var(--font-heading);
+  font-size: 12px; font-weight: 800; padding: 3px 7px; min-width: 20px; text-align: center;
+  border-radius: 6px; background: rgba(14,14,16,0.78); color: var(--color-accent);
+  backdrop-filter: blur(2px);
+}
 .item-title { font-family: var(--font-heading); font-weight: 700; font-size: 13.5px; line-height: 1.3; margin-bottom: 2px; }
 .item-card:hover .item-title { color: var(--color-accent); }
 .item-meta { font-size: 12px; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+
+.pagination { display: flex; align-items: center; justify-content: center; gap: 8px; margin: var(--space-5) 0 var(--space-2); }
+.pagination .btn { padding: 8px 12px; font-size: 13px; }
+.pagination .page-indicator {
+  min-width: 56px; text-align: center; font-family: var(--font-heading); font-weight: 700;
+  font-size: 13px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-surface-raised);
+}

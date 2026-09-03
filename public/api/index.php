@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../src/Mailer.php';
 require_once __DIR__ . '/../../src/LibraryScanner.php';
 require_once __DIR__ . '/../../src/ItemEnrichment.php';
 require_once __DIR__ . '/../../src/ItemPages.php';
+require_once __DIR__ . '/../../src/LibraryGroups.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -147,6 +148,24 @@ try {
                         respond(200, ['items' => [], 'total' => 0]);
                     }
                     $filters['library_ids'] = $allowedLibraryIds;
+                }
+                $groupLibraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
+                if (isset($_GET['publisher']) && $_GET['publisher'] !== '' && !empty($filters['type'])) {
+                    // no_collection=1 means "standalone tomes sitting directly under this
+                    // éditeur, with no collection subfolder" — the items shown alongside
+                    // the collection tiles rather than reached through one of them.
+                    $collection = !empty($_GET['no_collection'])
+                        ? false
+                        : (isset($_GET['collection']) && $_GET['collection'] !== '' ? (string) $_GET['collection'] : null);
+                    $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], $allowedLibraryIds, (string) $_GET['publisher'], $collection, $groupLibraryId);
+                    if (!$filters['ids']) {
+                        respond(200, ['items' => [], 'total' => 0]);
+                    }
+                } elseif (isset($_GET['collection']) && $_GET['collection'] !== '' && !empty($filters['type'])) {
+                    $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], $allowedLibraryIds, null, (string) $_GET['collection'], $groupLibraryId);
+                    if (!$filters['ids']) {
+                        respond(200, ['items' => [], 'total' => 0]);
+                    }
                 }
                 $sort = (string) ($_GET['sort'] ?? 'title');
                 $dir = (string) ($_GET['dir'] ?? 'ASC');
@@ -331,6 +350,86 @@ try {
                 $remainingStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ? AND metadata_checked_at IS NULL');
                 $remainingStmt->execute([$id]);
                 respond(200, ['processed' => count($batch), 'remaining' => (int) $remainingStmt->fetchColumn()]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'display-settings':
+            if ($method === 'GET') {
+                respond(200, ['show_publishers' => Settings::showPublishers()]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'library-groups':
+            Auth::requireReaderApi();
+            if ($method === 'GET') {
+                $type = (string) ($_GET['type'] ?? '');
+                if ($type === '') {
+                    respond(400, ['error' => 'Paramètre type requis']);
+                }
+                respond(200, LibraryGroups::listLibrariesForType($type, currentUserAllowedLibraries(), Settings::showEmptyLibrariesInNav()));
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'publishers':
+            Auth::requireReaderApi();
+            if ($method === 'GET') {
+                $type = (string) ($_GET['type'] ?? '');
+                if ($type === '') {
+                    respond(400, ['error' => 'Paramètre type requis']);
+                }
+                $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
+                respond(200, LibraryGroups::listPublishers($type, currentUserAllowedLibraries(), $libraryId));
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'collections':
+            Auth::requireReaderApi();
+            if ($method === 'GET') {
+                $type = (string) ($_GET['type'] ?? '');
+                if ($type === '') {
+                    respond(400, ['error' => 'Paramètre type requis']);
+                }
+                $publisher = isset($_GET['publisher']) && $_GET['publisher'] !== '' ? (string) $_GET['publisher'] : null;
+                $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
+                respond(200, LibraryGroups::listCollections($type, currentUserAllowedLibraries(), $publisher, $libraryId));
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'folder-thumbnail':
+            if ($method === 'GET') {
+                $requested = trim((string) ($_GET['path'] ?? ''), '/');
+                if ($requested === '' || preg_match('#(^|/)\.\.(/|$)#', $requested)) {
+                    respond(400, ['error' => 'Chemin invalide']);
+                }
+                $ext = strtolower(pathinfo($requested, PATHINFO_EXTENSION));
+                if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true)) {
+                    respond(400, ['error' => 'Chemin invalide']);
+                }
+                // Confirm the requested path actually falls under a library this
+                // user can see — this is only ever built from our own listing
+                // output, but a direct/crafted request shouldn't be able to peek
+                // at a folder from a library the caller has no access to.
+                $allowedLibraryIds = currentUserAllowedLibraries();
+                $owningLibrary = null;
+                foreach (Libraries::all() as $lib) {
+                    $prefix = trim($lib['path'], '/') . '/';
+                    if (str_starts_with($requested, $prefix)) {
+                        $owningLibrary = $lib;
+                        break;
+                    }
+                }
+                if ($owningLibrary === null || ($allowedLibraryIds !== null && !in_array((int) $owningLibrary['id'], $allowedLibraryIds, true))) {
+                    respond(404, ['error' => 'Introuvable']);
+                }
+                $abs = Paths::libraryRoot() . '/' . $requested;
+                if (!is_file($abs)) {
+                    respond(404, ['error' => 'Introuvable']);
+                }
+                $mimeTypes = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+                header('Content-Type: ' . $mimeTypes[$ext]);
+                header('Cache-Control: private, max-age=3600');
+                readfile($abs);
+                exit;
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -569,6 +668,8 @@ try {
                 $config['site_url'] = Settings::siteUrl();
                 $config['sync_token'] = Settings::syncToken();
                 $config['scan_exclude_pattern'] = Settings::scanExcludePattern();
+                $config['show_publishers'] = Settings::showPublishers();
+                $config['show_empty_libraries_nav'] = Settings::showEmptyLibrariesInNav();
                 respond(200, $config);
             }
             if ($method === 'PUT') {
@@ -585,6 +686,14 @@ try {
                     }
                     Settings::setScanExcludePattern($pattern);
                     unset($body['scan_exclude_pattern']);
+                }
+                if (isset($body['show_publishers'])) {
+                    Settings::setShowPublishers((bool) $body['show_publishers']);
+                    unset($body['show_publishers']);
+                }
+                if (isset($body['show_empty_libraries_nav'])) {
+                    Settings::setShowEmptyLibrariesInNav((bool) $body['show_empty_libraries_nav']);
+                    unset($body['show_empty_libraries_nav']);
                 }
                 if (isset($body['smtp_password']) && trim((string) $body['smtp_password']) === '') {
                     unset($body['smtp_password']); // blank = "leave unchanged", not "clear it"
