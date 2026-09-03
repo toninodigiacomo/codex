@@ -358,6 +358,34 @@
     return new Intl.NumberFormat('fr-FR').format(n || 0);
   }
 
+  /** Shared with the per-row button and the "Tout" button below it. */
+  async function extractMissingForLibrary(libId, box) {
+    let totalProcessed = 0;
+    while (true) {
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
+      const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=25`);
+      totalProcessed += res.processed;
+      if (res.processed === 0 || res.remaining === 0) break;
+    }
+    box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
+    return totalProcessed;
+  }
+
+  /** Shared with the per-row button and the "Tout" button below it. */
+  async function regenerateCoversForLibrary(libId, box) {
+    let offset = 0;
+    let total = null;
+    while (total === null || offset < total) {
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
+      const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=25&offset=${offset}`);
+      total = res.total;
+      offset = res.offset;
+      if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
+    }
+    box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
+    return offset;
+  }
+
   async function renderLibrariesTab() {
     const panel = panels.libraries;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
@@ -367,7 +395,11 @@
         <div class="admin-card">
           <div class="admin-card-head">
             <h2>Bibliothèques (${libraries.length})</h2>
-            <button class="btn btn-secondary btn-sm" id="syncAllBtn" ${libraries.length ? '' : 'disabled'}>Tout synchroniser</button>
+            <div class="admin-row-actions-group">
+              <button class="btn btn-secondary btn-sm" id="syncAllBtn" ${libraries.length ? '' : 'disabled'}>Tout synchroniser</button>
+              <button class="btn btn-secondary btn-sm" id="extractAllBtn" ${libraries.length ? '' : 'disabled'} title="Extraire les métadonnées et couvertures manquantes de toutes les bibliothèques, une par une">Tout extraire (métadonnées)</button>
+              <button class="btn btn-secondary btn-sm" id="regenerateAllBtn" ${libraries.length ? '' : 'disabled'} title="Re-générer toutes les couvertures de toutes les bibliothèques en miniatures, une par une">Tout régénérer (miniatures)</button>
+            </div>
           </div>
           <div class="admin-list" id="libList"></div>
           <div id="syncAllResult"></div>
@@ -420,6 +452,49 @@
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('extractAllBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const box = document.getElementById('syncAllResult');
+        btn.disabled = true;
+        let grandTotal = 0;
+        try {
+          for (const lib of libraries) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours — ${esc(lib.name)}...</p>`;
+            const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
+            grandTotal += await extractMissingForLibrary(lib.id, libBox);
+          }
+          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) traitée(s) au total. Terminé.</div>`;
+          showToast('Extraction terminée pour toutes les bibliothèques.');
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      document.getElementById('regenerateAllBtn').addEventListener('click', async (e) => {
+        if (!confirm('Re-générer toutes les couvertures de toutes les bibliothèques en miniatures ? Ça peut prendre un long moment pour une grosse collection.')) return;
+        const btn = e.currentTarget;
+        const box = document.getElementById('syncAllResult');
+        btn.disabled = true;
+        let grandTotal = 0;
+        try {
+          for (const lib of libraries) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours — ${esc(lib.name)}...</p>`;
+            const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
+            grandTotal += await regenerateCoversForLibrary(lib.id, libBox);
+          }
+          box.innerHTML = `<div class="invite-link-box">${grandTotal} couverture(s) régénérée(s) au total. Terminé.</div>`;
+          showToast('Régénération terminée pour toutes les bibliothèques.');
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
         }
       });
 
@@ -499,18 +574,9 @@
         const libId = btn.dataset.extractMissing;
         const box = document.getElementById(`sync-result-${libId}`);
         btn.disabled = true;
-        let totalProcessed = 0;
         try {
-          while (true) {
-            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
-            const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=25`);
-            totalProcessed += res.processed;
-            if (res.processed === 0 || res.remaining === 0) {
-              box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
-              break;
-            }
-          }
-          showToast(`Extraction terminée : ${totalProcessed} fiche(s) traitée(s).`);
+          const total = await extractMissingForLibrary(libId, box);
+          showToast(`Extraction terminée : ${total} fiche(s) traitée(s).`);
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -526,18 +592,9 @@
         const box = document.getElementById(`sync-result-${libId}`);
         if (!confirm("Re-générer toutes les couvertures de cette bibliothèque en miniatures ? Ça peut prendre un moment pour une grosse bibliothèque.")) return;
         btn.disabled = true;
-        let offset = 0;
-        let total = null;
         try {
-          while (total === null || offset < total) {
-            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
-            const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=25&offset=${offset}`);
-            total = res.total;
-            offset = res.offset;
-            if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
-          }
-          box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
-          showToast('Régénération des miniatures terminée.');
+          const total = await regenerateCoversForLibrary(libId, box);
+          showToast(`Régénération terminée : ${total} couverture(s).`);
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
