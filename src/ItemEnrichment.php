@@ -66,14 +66,16 @@ final class ItemEnrichment
             $coverDir = $publicDir . '/assets/covers';
             // Remove any previous cover for this item first, in case its
             // extension differs from this extraction's (e.g. a re-scanned
-            // file now yields a .jpg where a .png used to be).
+            // file now yields a .jpg where a .png used to be, or GD wasn't
+            // available last time so it's still at full resolution).
             foreach (glob($coverDir . '/' . $item['id'] . '.*') ?: [] as $old) {
                 @unlink($old);
             }
-            $relPath = 'assets/covers/' . $item['id'] . '.' . $found['ext'];
-            if (!Thumbnails::save($found['data'], $publicDir . '/' . $relPath)) {
+            $ext = Thumbnails::save($found['data'], $coverDir, (string) $item['id'], $found['ext']);
+            if ($ext === null) {
                 return null;
             }
+            $relPath = 'assets/covers/' . $item['id'] . '.' . $ext;
             Items::update((int) $item['id'], ['cover_path' => $relPath]);
             return $relPath;
         } catch (Throwable $e) {

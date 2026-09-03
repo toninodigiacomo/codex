@@ -158,4 +158,109 @@ final class Settings
     {
         self::set('show_empty_libraries_nav', $value ? '1' : '0');
     }
+
+    /**
+     * The on-screen width, in pixels, of a cover tile in the grids — and,
+     * since a tile is generated at exactly this size rather than some
+     * larger "safe" resolution, also the width a thumbnail is actually
+     * rendered at. Height always follows at a fixed 25:36 ratio (matching
+     * a typical comic cover); there's deliberately only one slider for
+     * this, not two, so the two numbers can't drift out of proportion.
+     * Applies to both extracted covers (Thumbnails::save, item grids) and
+     * folder.jpg-style thumbnails (Thumbnails::resizeFile, the éditeur
+     * nav's tile grids). Changing it only affects thumbnails generated
+     * from here on: folder-thumbnail's disk cache is keyed on this value
+     * too so it regenerates on its own, but already-extracted covers need
+     * the admin's "Régénérer les miniatures" to pick up a new size.
+     */
+    public static function thumbnailWidth(): int
+    {
+        $stored = self::get('thumbnail_width');
+        $value = $stored !== null ? (int) $stored : 165;
+        return $value > 0 ? $value : 165;
+    }
+
+    public static function setThumbnailWidth(int $value): void
+    {
+        self::set('thumbnail_width', (string) max(50, min(300, $value)));
+    }
+
+    /** thumbnailWidth()'s fixed companion — see the ratio note above. */
+    public static function thumbnailHeight(): int
+    {
+        return (int) round(self::thumbnailWidth() * 36 / 25);
+    }
+
+    /**
+     * How many columns wide a grid is — the classic browse grid and every
+     * level of the éditeur nav's tile grids alike. Not fixed at 10 after
+     * all: admin-configurable, default 10.
+     */
+    public static function gridColumns(): int
+    {
+        $stored = self::get('grid_columns');
+        $value = $stored !== null ? (int) $stored : 10;
+        return $value > 0 ? $value : 10;
+    }
+
+    public static function setGridColumns(int $value): void
+    {
+        self::set('grid_columns', (string) max(1, min(15, $value)));
+    }
+
+    /**
+     * How many tiles a grid shows before paginating — the classic browse
+     * grid and every level of the éditeur nav's tile grids alike, so a
+     * library with thousands of items or an éditeur with hundreds of
+     * loose tomes never renders more than this at once. Independent of
+     * gridColumns() above — this is the page's total, not a row count.
+     */
+    public static function gridPageSize(): int
+    {
+        $stored = self::get('grid_page_size');
+        $value = $stored !== null ? (int) $stored : 80;
+        return $value > 0 ? $value : 80;
+    }
+
+    public static function setGridPageSize(int $value): void
+    {
+        self::set('grid_page_size', (string) max(1, min(300, $value)));
+    }
+
+    /**
+     * How many columns wide a home page shelf (Bandes Dessinées
+     * récentes...) shows before the rest needs a horizontal scroll to
+     * reach — the shelf still fetches a full 60 regardless (see
+     * library.js), this only controls how many are visible without
+     * scrolling.
+     */
+    public static function homeShelfColumns(): int
+    {
+        $stored = self::get('home_shelf_columns');
+        $value = $stored !== null ? (int) $stored : 10;
+        return $value > 0 ? $value : 10;
+    }
+
+    public static function setHomeShelfColumns(int $value): void
+    {
+        self::set('home_shelf_columns', (string) max(1, min(15, $value)));
+    }
+
+    /**
+     * How many rows tall a home page shelf is — 1 (a single scrolling
+     * row, the original design) by default. Above 1, tiles fill a column
+     * at a time (see .shelf-row's grid-auto-flow in library.css) so
+     * scrolling still only ever happens horizontally.
+     */
+    public static function homeShelfRows(): int
+    {
+        $stored = self::get('home_shelf_rows');
+        $value = $stored !== null ? (int) $stored : 1;
+        return $value > 0 ? $value : 1;
+    }
+
+    public static function setHomeShelfRows(int $value): void
+    {
+        self::set('home_shelf_rows', (string) max(1, min(5, $value)));
+    }
 }

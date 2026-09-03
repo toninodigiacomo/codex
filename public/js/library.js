@@ -7,9 +7,9 @@
 
   const TYPE_LABELS = { comic: 'BD', ebook: 'Ebook', magazine: 'Magazine', other: 'Autre' };
   const HOME_SHELF_TYPES = ['comic', 'ebook', 'magazine', 'other'];
-  const HOME_SHELF_TYPES_FETCH_LIMIT = 60; // a full scrollable shelf's worth, per the "let's say 60" request
+  const HOME_SHELF_TYPES_FETCH_LIMIT = 60; // a full scrollable shelf's worth — how many are *visible* without scrolling is separate, see applyDisplaySettings
 
-  const BROWSE_PAGE_SIZE = 120;
+  let gridPageSize = 80; // replaced by display-settings once loaded, see applyDisplaySettings
 
   const state = {
     mode: 'home', // 'home' | 'browse' | 'group'
@@ -21,15 +21,27 @@
     sort: 'added_at',
     dir: 'DESC',
     page: 1, // 1-indexed, browse mode only — reset to 1 whenever a filter/search/sort changes
-    groupLevel: null, // 'library' | 'publisher' | 'collection' — only meaningful when mode === 'group'
+    groupLevel: null, // 'library' | 'path' — only meaningful when mode === 'group'
     groupLibraryId: null, // the single library the éditeur flow is scoped to, once past the library tile grid
     groupLibraryName: null,
     groupSkippedLibraryLevel: false, // true when there was only one library of the type, so the library grid was never shown
-    groupPublisher: null, // the publisher a collection-level group view, or a filtered browse, is scoped to
-    groupCollection: null, // the collection a filtered browse is scoped to
+    // The folder path chosen so far within the éditeur nav (éditeur, collection,
+    // sous-collection... any depth) — null whenever we're outside that flow
+    // entirely (plain type browse, home, search), so goBackFromGroupFlow can
+    // tell "inside the éditeur flow" from "not" with a single check.
+    groupPath: null,
+    groupItemsPage: 1, // 1-indexed — the standalone-tomes portion of a group-level tile grid pages independently of state.page
   };
 
-  let displaySettings = { show_publishers: false };
+  let displaySettings = {
+    show_publishers: false,
+    thumbnail_width: 165,
+    thumbnail_height: 238,
+    grid_columns: 10,
+    grid_page_size: 80,
+    home_shelf_columns: 10,
+    home_shelf_rows: 1,
+  };
 
   let libraries = [];
   let series = [];
@@ -60,17 +72,55 @@
   const sortSelect = document.getElementById('sortSelect');
   const browseBackBtn = document.getElementById('browseBackBtn');
   const pagination = document.getElementById('pagination');
+  const groupPagination = document.getElementById('groupPagination');
   browseBackBtn.addEventListener('click', goBackFromGroupFlow);
 
   async function fetchJson(url) {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+    if (!res.ok) {
+      // The API's error responses carry a JSON body ({error, detail}) with the
+      // actual PHP exception message — surfacing it here means a 500 in the UI
+      // says *why*, instead of just the status code.
+      let detail = '';
+      try {
+        const body = await res.json();
+        detail = body.detail || body.error || '';
+      } catch (_) {
+        // response wasn't JSON (e.g. a raw PHP fatal error page) — fall back to the status alone
+      }
+      throw new Error(`${url} → HTTP ${res.status}${detail ? ` (${detail})` : ''}`);
+    }
     return res.json();
+  }
+
+  /**
+   * Turns the fetched display settings into CSS custom properties, so
+   * library.css can size tiles and cap grid/shelf dimensions without
+   * hardcoding pixel values. --grid-max-width and --shelf-max-width are
+   * computed here (in px) rather than left as a CSS calc() of several
+   * variables, since the actual gap size is itself a design token
+   * (--space-3) whose real pixel value is easiest to read back via
+   * getComputedStyle rather than duplicated as a guess in more CSS.
+   */
+  function applyDisplaySettings(settings) {
+    const root = document.documentElement;
+    const thumbW = settings.thumbnail_width || 165;
+    const thumbH = settings.thumbnail_height || Math.round((thumbW * 36) / 25);
+    const gridCols = settings.grid_columns || 10;
+    const shelfCols = settings.home_shelf_columns || 10;
+    const shelfRows = settings.home_shelf_rows || 1;
+    const colGap = parseFloat(getComputedStyle(root).getPropertyValue('--space-3')) || 12;
+
+    root.style.setProperty('--thumb-w', `${thumbW}px`);
+    root.style.setProperty('--thumb-h', `${thumbH}px`);
+    root.style.setProperty('--grid-max-width', `${gridCols * thumbW + (gridCols - 1) * colGap}px`);
+    root.style.setProperty('--shelf-max-width', `${shelfCols * thumbW + (shelfCols - 1) * colGap}px`);
+    root.style.setProperty('--shelf-rows', String(shelfRows));
   }
 
   function coverMarkup(item) {
     if (item.cover_path) {
-      return `<img src="${esc(item.cover_path)}" alt="" loading="lazy" />`;
+      return `<img src="${esc(item.cover_path)}" alt="" loading="lazy" decoding="async" />`;
     }
     return `<div class="fallback">${esc(item.title)}</div>`;
   }
@@ -259,12 +309,11 @@
     if (state.series_id) params.set('series_id', state.series_id);
     if (state.tag_id) params.set('tag_id', state.tag_id);
     if (state.q) params.set('q', state.q);
-    if (state.groupPublisher) params.set('publisher', state.groupPublisher);
-    if (state.groupCollection) params.set('collection', state.groupCollection);
+    if (state.groupPath && state.groupPath.length) params.set('path', JSON.stringify(state.groupPath));
     params.set('sort', state.sort);
     params.set('dir', state.dir);
-    params.set('limit', String(BROWSE_PAGE_SIZE));
-    params.set('offset', String((state.page - 1) * BROWSE_PAGE_SIZE));
+    params.set('limit', String(gridPageSize));
+    params.set('offset', String((state.page - 1) * gridPageSize));
 
     try {
       const data = await fetchJson(`/api/items?${params.toString()}`);
@@ -274,8 +323,8 @@
       emptyState.hidden = data.items.length !== 0;
       grid.hidden = data.items.length === 0;
       renderPagination(data.total);
-      browseBackBtn.hidden = !(state.groupPublisher || state.groupCollection);
-      browseBackBtn.textContent = state.groupCollection ? `← ${state.groupCollection}` : (state.groupPublisher ? `← ${state.groupPublisher}` : '← Retour');
+      browseBackBtn.hidden = state.groupPath === null;
+      browseBackBtn.textContent = state.groupPath && state.groupPath.length ? `← ${state.groupPath[state.groupPath.length - 1]}` : '← Retour';
     } catch (err) {
       grid.innerHTML = '';
       resultCount.textContent = '';
@@ -286,30 +335,39 @@
   }
 
   /** 12-13k BD ne tiennent jamais dans une seule page — « première/précédent/n sur N/suivant/dernière ». */
-  function renderPagination(total) {
-    const totalPages = Math.max(1, Math.ceil(total / BROWSE_PAGE_SIZE));
+  /** Generic — used for the browse grid's own pagination and for a group-level view's standalone-items pagination alike. */
+  function renderPaginationInto(container, currentPage, total, onChange) {
+    const totalPages = Math.max(1, Math.ceil(total / gridPageSize));
     if (totalPages <= 1) {
-      pagination.hidden = true;
-      pagination.innerHTML = '';
+      container.hidden = true;
+      container.innerHTML = '';
       return;
     }
-    pagination.hidden = false;
-    pagination.innerHTML = `
-      <button type="button" class="btn btn-secondary" data-page-action="first" ${state.page <= 1 ? 'disabled' : ''} aria-label="Première page">«</button>
-      <button type="button" class="btn btn-secondary" data-page-action="prev" ${state.page <= 1 ? 'disabled' : ''} aria-label="Page précédente">‹</button>
-      <span class="page-indicator">${state.page} / ${totalPages}</span>
-      <button type="button" class="btn btn-secondary" data-page-action="next" ${state.page >= totalPages ? 'disabled' : ''} aria-label="Page suivante">›</button>
-      <button type="button" class="btn btn-secondary" data-page-action="last" ${state.page >= totalPages ? 'disabled' : ''} aria-label="Dernière page">»</button>
+    container.hidden = false;
+    container.innerHTML = `
+      <button type="button" class="btn btn-secondary" data-page-action="first" ${currentPage <= 1 ? 'disabled' : ''} aria-label="Première page">«</button>
+      <button type="button" class="btn btn-secondary" data-page-action="prev" ${currentPage <= 1 ? 'disabled' : ''} aria-label="Page précédente">‹</button>
+      <span class="page-indicator">${currentPage} / ${totalPages}</span>
+      <button type="button" class="btn btn-secondary" data-page-action="next" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="Page suivante">›</button>
+      <button type="button" class="btn btn-secondary" data-page-action="last" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="Dernière page">»</button>
     `;
-    pagination.querySelectorAll('[data-page-action]').forEach((btn) => {
+    container.querySelectorAll('[data-page-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.pageAction;
-        if (action === 'first') state.page = 1;
-        else if (action === 'prev') state.page = Math.max(1, state.page - 1);
-        else if (action === 'next') state.page = Math.min(totalPages, state.page + 1);
-        else if (action === 'last') state.page = totalPages;
-        loadItems();
+        let next = currentPage;
+        if (action === 'first') next = 1;
+        else if (action === 'prev') next = Math.max(1, currentPage - 1);
+        else if (action === 'next') next = Math.min(totalPages, currentPage + 1);
+        else if (action === 'last') next = totalPages;
+        onChange(next);
       });
+    });
+  }
+
+  function renderPagination(total) {
+    renderPaginationInto(pagination, state.page, total, (next) => {
+      state.page = next;
+      loadItems();
     });
   }
 
@@ -337,8 +395,7 @@
           state.type = type;
           state.page = 1;
           state.groupLibraryId = null;
-          state.groupPublisher = null;
-          state.groupCollection = null;
+          state.groupPath = null;
           loadItems();
         }
       });
@@ -350,7 +407,7 @@
     return `
       <div class="item-card" data-group-tile="${esc(g.name)}"${idAttr} style="cursor:pointer;">
         <div class="item-cover">
-          ${g.thumbnail ? `<img src="${esc(g.thumbnail)}" alt="" loading="lazy" />` : `<div class="fallback">${esc(g.name)}</div>`}
+          ${g.thumbnail ? `<img src="${esc(g.thumbnail)}" alt="" loading="lazy" decoding="async" />` : `<div class="fallback">${esc(g.name)}</div>`}
           <span class="group-count-badge">${g.count}</span>
         </div>
         <div class="item-title">${esc(g.name)}</div>
@@ -366,6 +423,7 @@
     groupBackBtn.textContent = '← Retour';
     groupGrid.innerHTML = '';
     groupEmptyState.hidden = true;
+    groupPagination.hidden = true;
   }
 
   /** Arrow click: skips straight to the éditeur grid when the type has only one library, per admin's confirmed behaviour. */
@@ -373,7 +431,7 @@
     try {
       const libs = await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`);
       if (libs.length === 1) {
-        openPublisherLevel(type, libs[0].id, libs[0].name, true);
+        openPathLevel(type, libs[0].id, libs[0].name, [], true);
       } else {
         openLibraryLevel(type, libs);
       }
@@ -390,8 +448,7 @@
     state.groupLibraryId = null;
     state.groupLibraryName = null;
     state.groupSkippedLibraryLevel = false;
-    state.groupPublisher = null;
-    state.groupCollection = null;
+    state.groupPath = null;
     showGroupView('Bibliothèques');
 
     try {
@@ -403,7 +460,7 @@
       groupGrid.innerHTML = groups.map((g) => groupTileHtml(g, g.id)).join('');
       groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
         tile.addEventListener('click', () => {
-          openPublisherLevel(type, Number(tile.dataset.groupTileId), tile.dataset.groupTile, false);
+          openPathLevel(type, Number(tile.dataset.groupTileId), tile.dataset.groupTile, [], false);
         });
       });
     } catch (err) {
@@ -412,81 +469,79 @@
     }
   }
 
-  /** Second tile grid: éditeurs within one specific library. */
-  async function openPublisherLevel(type, libraryId, libraryName, skippedLibraryLevel) {
+  /**
+   * The recursive éditeur/collection/sous-collection grid: the folders
+   * directly under $path (éditeurs when $path is empty), mixed with any
+   * tomes sitting directly in that folder with no further subfolder. A
+   * folder with no subfolders at all (a leaf — an éditeur or collection
+   * with nothing nested deeper) never gets an empty tile grid: it skips
+   * straight to the full paginated browse instead, however deep it is.
+   *
+   * Subfolders are never paginated — a folder count realistically never
+   * gets anywhere near gridPageSize. The standalone tomes shown alongside
+   * them can, though (a big éditeur's loose one-shots), so that part
+   * pages independently via state.groupItemsPage; the subfolder tiles
+   * stay pinned at the top of every page.
+   */
+  async function openPathLevel(type, libraryId, libraryName, path, skippedLibraryLevel, itemsPage) {
     state.mode = 'group';
     state.type = type;
-    state.groupLevel = 'publisher';
+    state.groupLevel = 'path';
     state.groupLibraryId = libraryId;
     state.groupLibraryName = libraryName;
     state.groupSkippedLibraryLevel = skippedLibraryLevel;
-    state.groupPublisher = null;
-    state.groupCollection = null;
-    showGroupView(`Éditeurs — ${libraryName}`);
+    state.groupPath = path;
+    state.groupItemsPage = itemsPage || 1;
+
+    const pathQuery = encodeURIComponent(JSON.stringify(path));
+    const baseParams = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}&path=${pathQuery}`;
 
     try {
-      const groups = await fetchJson(`/api/publishers?type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}`);
-      if (!groups.length) {
-        groupEmptyState.hidden = false;
+      const subfolders = await fetchJson(`/api/subfolders?${baseParams}`);
+      if (!subfolders.length && state.groupItemsPage === 1) {
+        openFilteredBrowse(type, libraryId, path);
         return;
       }
-      groupGrid.innerHTML = groups.map((g) => groupTileHtml(g)).join('');
+      showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
+      const itemsOffset = (state.groupItemsPage - 1) * gridPageSize;
+      const standalone = await fetchJson(`/api/items?${baseParams}&exact=1&limit=${gridPageSize}&offset=${itemsOffset}`);
+      groupGrid.innerHTML = subfolders.map((g) => groupTileHtml(g)).join('') + standalone.items.map(itemCardHtml).join('');
       groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
-        tile.addEventListener('click', () => openCollectionLevel(type, tile.dataset.groupTile));
+        tile.addEventListener('click', () => {
+          openPathLevel(type, libraryId, libraryName, [...path, tile.dataset.groupTile], skippedLibraryLevel);
+        });
+      });
+      renderPaginationInto(groupPagination, state.groupItemsPage, standalone.total, (next) => {
+        openPathLevel(type, libraryId, libraryName, path, skippedLibraryLevel, next);
       });
     } catch (err) {
+      showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
       groupEmptyState.hidden = false;
       groupEmptyState.textContent = `Erreur : ${err.message}`;
+      groupPagination.hidden = true;
     }
   }
 
-  /** Third grid: an éditeur's collections, plus the standalone tomes sitting directly in its folder. */
-  async function openCollectionLevel(type, publisher) {
-    state.mode = 'group';
-    state.type = type;
-    state.groupLevel = 'collection';
-    state.groupPublisher = publisher;
-    state.groupCollection = null;
-    showGroupView(`Collections — ${publisher}`);
-
-    try {
-      const params = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(state.groupLibraryId)}&publisher=${encodeURIComponent(publisher)}`;
-      const [collections, standalone] = await Promise.all([
-        fetchJson(`/api/collections?${params}`),
-        fetchJson(`/api/items?${params}&no_collection=1&limit=200`),
-      ]);
-      if (!collections.length && !standalone.items.length) {
-        groupEmptyState.hidden = false;
-        return;
-      }
-      groupGrid.innerHTML = collections.map((g) => groupTileHtml(g)).join('') + standalone.items.map(itemCardHtml).join('');
-      groupGrid.querySelectorAll('[data-group-tile]').forEach((tile) => {
-        tile.addEventListener('click', () => openFilteredBrowse(type, state.groupLibraryId, publisher, tile.dataset.groupTile));
-      });
-    } catch (err) {
-      groupEmptyState.hidden = false;
-      groupEmptyState.textContent = `Erreur : ${err.message}`;
-    }
-  }
-
-  function openFilteredBrowse(type, libraryId, publisher, collection) {
+  function openFilteredBrowse(type, libraryId, path) {
     switchToBrowseMode();
     state.type = type;
     state.page = 1;
     state.groupLibraryId = libraryId;
-    state.groupPublisher = publisher;
-    state.groupCollection = collection;
+    state.groupPath = path;
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = input.value === type; });
     loadItems();
   }
 
-  /** Where the back arrow goes depends on how the current screen was reached. */
+  /**
+   * Where the back arrow goes depends on how deep the current screen sits
+   * in the éditeur flow — one path segment shorter each time, all the way
+   * back to the library grid (or home, if that grid was skipped). Outside
+   * the flow entirely (groupPath === null), it's always home.
+   */
   function goBackFromGroupFlow() {
-    if (state.mode === 'browse' && state.groupCollection) {
-      openCollectionLevel(state.type, state.groupPublisher);
-    } else if (state.mode === 'group' && state.groupLevel === 'collection') {
-      openPublisherLevel(state.type, state.groupLibraryId, state.groupLibraryName, state.groupSkippedLibraryLevel);
-    } else if (state.mode === 'group' && state.groupLevel === 'publisher') {
+    if (state.groupPath !== null && state.groupPath.length > 0) {
+      openPathLevel(state.type, state.groupLibraryId, state.groupLibraryName, state.groupPath.slice(0, -1), state.groupSkippedLibraryLevel);
+    } else if (state.groupPath !== null) {
       if (state.groupSkippedLibraryLevel) {
         switchToHomeMode();
       } else {
@@ -506,8 +561,7 @@
     state.groupLibraryId = null;
     state.groupLibraryName = null;
     state.groupSkippedLibraryLevel = false;
-    state.groupPublisher = null;
-    state.groupCollection = null;
+    state.groupPath = null;
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
     browseView.hidden = true;
     groupView.hidden = true;
@@ -568,15 +622,19 @@
     fetchJson('/api/libraries').catch(() => []),
     fetchJson('/api/series').catch(() => []),
     fetchJson('/api/tags').catch(() => []),
-    fetchJson('/api/display-settings').catch(() => ({ show_publishers: false })),
+    fetchJson('/api/display-settings').catch(() => displaySettings),
   ]).then(([libs, ser, tg, disp]) => {
     libraries = libs;
     series = ser;
     tags = tg;
     displaySettings = disp;
+    gridPageSize = disp.grid_page_size || 80;
+    applyDisplaySettings(disp);
     renderTypeTabs();
     syncSidebarActiveStates();
+    // Deferred until here rather than fired in parallel at the top of the
+    // file: the home shelves' tile size and visible width both depend on
+    // the CSS variables applyDisplaySettings just set.
+    loadHome();
   });
-
-  loadHome();
 })();

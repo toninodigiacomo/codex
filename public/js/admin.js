@@ -354,6 +354,10 @@
     return 'Synchronisée le ' + d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }
 
+  function formatCount(n) {
+    return new Intl.NumberFormat('fr-FR').format(n || 0);
+  }
+
   async function renderLibrariesTab() {
     const panel = panels.libraries;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
@@ -450,7 +454,7 @@
       <div class="admin-row" id="lib-row-${l.id}">
         <div class="admin-row-main">
           <strong>${esc(l.name)}</strong>
-          <span>libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)}</span>
+          <span>libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)} — ${formatCount(l.item_count)} objet${l.item_count === 1 ? '' : 's'}</span>
         </div>
         <div class="admin-row-badges">
           <span class="badge badge-reader">${TYPE_LABELS[l.type] || l.type}</span>
@@ -459,6 +463,7 @@
           <div class="admin-row-actions-group">
             <button class="btn btn-secondary btn-sm" data-sync-lib="${l.id}">Synchroniser</button>
             <button class="btn btn-secondary btn-sm" data-extract-missing="${l.id}" title="Extraire les métadonnées et couvertures manquantes">Métadonnées manquantes</button>
+            <button class="btn btn-secondary btn-sm" data-regenerate-covers="${l.id}" title="Re-générer toutes les couvertures en miniatures (utile après l'activation de GD)">Régénérer les miniatures</button>
           </div>
           <div class="admin-row-actions-group">
             <button class="btn btn-secondary btn-sm" data-edit-lib="${l.id}">Modifier</button>
@@ -506,6 +511,33 @@
             }
           }
           showToast(`Extraction terminée : ${totalProcessed} fiche(s) traitée(s).`);
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    list.querySelectorAll('[data-regenerate-covers]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const libId = btn.dataset.regenerateCovers;
+        const box = document.getElementById(`sync-result-${libId}`);
+        if (!confirm("Re-générer toutes les couvertures de cette bibliothèque en miniatures ? Ça peut prendre un moment pour une grosse bibliothèque.")) return;
+        btn.disabled = true;
+        let offset = 0;
+        let total = null;
+        try {
+          while (total === null || offset < total) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
+            const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=25&offset=${offset}`);
+            total = res.total;
+            offset = res.offset;
+            if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
+          }
+          box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
+          showToast('Régénération des miniatures terminée.');
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -684,6 +716,57 @@
           </form>
         </div>
         <div class="admin-card">
+          <h2>Miniatures</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Taille des miniatures affichées dans les grilles — couvertures des objets et vignettes
+            <code>folder.jpg</code> des grilles éditeur/collection, sur la page utilisateur comme ici dans
+            l'admin. La hauteur suit toujours automatiquement, au ratio 25:36. ${
+              s.gd_available
+                ? "Ne change que les miniatures générées à partir de maintenant : une nouvelle synchronisation en tient compte automatiquement, mais les couvertures déjà extraites ont besoin d'un clic sur « Régénérer les miniatures » (onglet Bibliothèques) pour être reprises à la nouvelle taille."
+                : "GD n'est pas disponible sur ce serveur (voir le conteneur) — les couvertures sont servies à leur résolution d'origine tant que ça n'est pas résolu ; ce réglage sera pris en compte dès que GD sera actif."
+            }
+          </p>
+          <div class="field">
+            <label for="thumbnailWidthSlider">Largeur des miniatures — <span id="thumbnailSizeLabel">${s.thumbnail_width} × ${s.thumbnail_height} px</span></label>
+            <input id="thumbnailWidthSlider" type="range" min="50" max="300" step="5" value="${esc(s.thumbnail_width)}" style="width:100%;max-width:320px;" />
+          </div>
+          <div>
+            <button type="button" class="btn btn-secondary" id="saveThumbnailSizeBtn" style="margin-top:var(--space-3);">Enregistrer</button>
+          </div>
+        </div>
+        <div class="admin-card">
+          <h2>Densité des grilles</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Les grilles (page de navigation classique et éditeur/collection) tiennent sur un nombre de colonnes
+            fixe, centrées, et paginent au-delà du total défini. Les étagères de la page d'accueil chargent
+            toujours 60 objets récents par type, mais n'en montrent qu'une partie sans avoir à faire défiler
+            horizontalement.
+          </p>
+          <div class="admin-form-row">
+            <div class="field">
+              <label for="gridColumns">Colonnes des grilles</label>
+              <input class="input" id="gridColumns" type="number" min="1" max="15" value="${esc(s.grid_columns)}" style="width:100px;" />
+            </div>
+            <div class="field">
+              <label for="gridPageSize">Objets max par page de grille</label>
+              <input class="input" id="gridPageSize" type="number" min="1" max="300" value="${esc(s.grid_page_size)}" style="width:120px;" />
+            </div>
+          </div>
+          <div class="admin-form-row">
+            <div class="field">
+              <label for="homeShelfColumns">Colonnes visibles par étagère</label>
+              <input class="input" id="homeShelfColumns" type="number" min="1" max="15" value="${esc(s.home_shelf_columns)}" style="width:100px;" />
+            </div>
+            <div class="field">
+              <label for="homeShelfRows">Rangées par étagère</label>
+              <input class="input" id="homeShelfRows" type="number" min="1" max="5" value="${esc(s.home_shelf_rows)}" style="width:100px;" />
+            </div>
+            <div>
+              <button type="button" class="btn btn-secondary" id="saveGridDensityBtn">Enregistrer</button>
+            </div>
+          </div>
+        </div>
+        <div class="admin-card">
           <h2>Navigation par éditeur</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
             Pour une bibliothèque rangée en <code>Éditeur/Collection/Tome...</code>, ajoute une flèche à côté
@@ -758,6 +841,56 @@
           document.getElementById('syncTokenField').value = res.sync_token;
           showToast('Jeton régénéré.');
           renderSettingsTab();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('thumbnailWidthSlider').addEventListener('input', (e) => {
+        const w = Number(e.target.value);
+        const h = Math.round((w * 36) / 25);
+        document.getElementById('thumbnailSizeLabel').textContent = `${w} × ${h} px`;
+      });
+
+      document.getElementById('saveThumbnailSizeBtn').addEventListener('click', async () => {
+        const width = Number(document.getElementById('thumbnailWidthSlider').value);
+        try {
+          await api('PUT', '/api/settings', { thumbnail_width: width });
+          showToast('Enregistré.');
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('saveGridDensityBtn').addEventListener('click', async () => {
+        const gridColumns = Number(document.getElementById('gridColumns').value);
+        const gridSize = Number(document.getElementById('gridPageSize').value);
+        const shelfColumns = Number(document.getElementById('homeShelfColumns').value);
+        const shelfRows = Number(document.getElementById('homeShelfRows').value);
+        if (!gridColumns || gridColumns < 1 || gridColumns > 15) {
+          showToast('Le nombre de colonnes des grilles doit être compris entre 1 et 15.', true);
+          return;
+        }
+        if (!gridSize || gridSize < 1 || gridSize > 300) {
+          showToast('Le nombre d\u2019objets par page doit être compris entre 1 et 300.', true);
+          return;
+        }
+        if (!shelfColumns || shelfColumns < 1 || shelfColumns > 15) {
+          showToast('Le nombre de colonnes visibles par étagère doit être compris entre 1 et 15.', true);
+          return;
+        }
+        if (!shelfRows || shelfRows < 1 || shelfRows > 5) {
+          showToast('Le nombre de rangées par étagère doit être compris entre 1 et 5.', true);
+          return;
+        }
+        try {
+          await api('PUT', '/api/settings', {
+            grid_columns: gridColumns,
+            grid_page_size: gridSize,
+            home_shelf_columns: shelfColumns,
+            home_shelf_rows: shelfRows,
+          });
+          showToast('Enregistré.');
         } catch (err) {
           showToast(err.message, true);
         }

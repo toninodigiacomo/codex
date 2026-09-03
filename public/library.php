@@ -117,6 +117,7 @@ Auth::requireReaderPage();
         </div>
         <div class="item-grid" id="groupGrid"></div>
         <p class="text-muted" id="groupEmptyState" hidden>Aucun résultat.</p>
+        <div class="pagination" id="groupPagination" hidden></div>
       </div>
     </main>
   </div>

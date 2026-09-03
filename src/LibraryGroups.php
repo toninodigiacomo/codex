@@ -7,21 +7,21 @@ require_once __DIR__ . '/Libraries.php';
 require_once __DIR__ . '/Paths.php';
 
 /**
- * A library organized as Éditeur/Collection/Tome... on disk (rather than
- * relying on per-item metadata) can be browsed that way too, once
- * enabled in Réglages. Nothing here is stored — every listing is
- * derived on the fly from `items.path`, relative to whichever library
- * each item belongs to: the first folder segment is the "publisher",
- * the second (when there is one) is the "collection". An item sitting
- * directly in a library's own root, or one level deep with nothing
- * beneath it, simply doesn't participate — there's no publisher/collection
- * to show it under.
+ * A library organized as Éditeur/Collection/Sous-collection/.../Tome... on
+ * disk (rather than relying on per-item metadata) can be browsed that way
+ * too, once enabled in Réglages. Nothing here is stored — every listing is
+ * derived on the fly from `items.path`, relative to whichever library each
+ * item belongs to. Nesting depth is unlimited and uniform: an éditeur, a
+ * collection, and any sous-collection inside it are all just "the folders
+ * directly under this path" — the nav recurses one level at a time for as
+ * long as there's another folder to descend into, and falls back to a
+ * plain paginated browse once a path bottoms out at actual files.
  *
- * The nav itself has three levels: Bibliothèque (one tile per library of
- * the chosen type — libraries are never merged, even when two share a
- * type) → Éditeur (within that one library) → Collection, and an
- * éditeur's tile grid also carries along the standalone tomes that sit
- * directly under it with no collection folder.
+ * The nav itself starts with Bibliothèque (one tile per library of the
+ * chosen type — libraries are never merged, even when two share a type),
+ * then descends through as many folder levels as the library actually
+ * has. At every level, the tile grid for a path also carries along the
+ * standalone tomes that sit directly under it with no further subfolder.
  *
  * A folder's thumbnail follows the same convention as Ubooquity's own
  * sidecar images — the exact files a library's scan already excludes
@@ -81,63 +81,19 @@ final class LibraryGroups
         return $result;
     }
 
-    /** @return list<array{name: string, thumbnail: ?string, count: int}> */
-    public static function listPublishers(string $type, ?array $allowedLibraryIds, ?int $libraryId): array
-    {
-        return self::groupBy($type, $allowedLibraryIds, 0, null, $libraryId);
-    }
-
-    /** @return list<array{name: string, thumbnail: ?string, count: int}> */
-    public static function listCollections(string $type, ?array $allowedLibraryIds, ?string $publisherFilter, ?int $libraryId): array
-    {
-        return self::groupBy($type, $allowedLibraryIds, 1, $publisherFilter, $libraryId);
-    }
-
     /**
-     * Item ids whose path — relative to whichever library each belongs
-     * to — matches the given publisher and/or collection segment
-     * exactly. Matching is done in PHP rather than as a SQL LIKE
-     * pattern deliberately: a collection reached from the flat,
-     * publisher-less "Collections" listing has no publisher to anchor
-     * a path prefix on, and a wildcard-anywhere pattern risks a false
-     * match if the collection's name happened to appear as a substring
-     * elsewhere in some other item's path.
-     *
-     * $collection has three meanings: null = don't filter on it at all,
-     * a string = must sit in that exact collection folder, false = must
-     * sit directly under the publisher with no collection folder at all
-     * (the standalone tomes shown alongside the collection tiles).
-     * @return list<int>
+     * The tile grid of folders directly under $pathPrefix — an éditeur
+     * listing when $pathPrefix is empty, a collection or sous-collection
+     * listing at any depth otherwise. Recursing further is just calling
+     * this again with one more segment appended; an empty result means
+     * $pathPrefix is a leaf (nothing left to descend into).
+     * @param list<string> $pathPrefix
+     * @return list<array{name: string, thumbnail: ?string, count: int}>
      */
-    public static function itemIdsMatching(string $type, ?array $allowedLibraryIds, ?string $publisher, string|false|null $collection, ?int $libraryId = null): array
+    public static function listSubfolders(string $type, ?array $allowedLibraryIds, ?int $libraryId, array $pathPrefix): array
     {
-        $ids = [];
-        foreach (self::librariesOfType($type, $allowedLibraryIds, $libraryId) as $lib) {
-            $stmt = Database::connection()->prepare('SELECT id, path FROM items WHERE library_id = ?');
-            $stmt->execute([$lib['id']]);
-            foreach ($stmt->fetchAll() as $row) {
-                $segments = explode('/', self::relativeToLibrary($row['path'], $lib['path']));
-                array_pop($segments); // filename
-                if ($publisher !== null && ($segments[0] ?? null) !== $publisher) {
-                    continue;
-                }
-                if ($collection === false) {
-                    if (count($segments) !== 1) {
-                        continue;
-                    }
-                } elseif ($collection !== null && ($segments[1] ?? null) !== $collection) {
-                    continue;
-                }
-                $ids[] = (int) $row['id'];
-            }
-        }
-        return $ids;
-    }
-
-    /** @return list<array{name: string, thumbnail: ?string, count: int}> */
-    private static function groupBy(string $type, ?array $allowedLibraryIds, int $segmentIndex, ?string $publisherFilter, ?int $libraryId = null): array
-    {
-        $groups = []; // name => ['count' => int, 'absDir' => string, 'sortKey' => ?string, 'cover' => ?string]
+        $depth = count($pathPrefix);
+        $groups = []; // name => ['name' => string, 'count' => int, 'absDir' => string, 'sortKey' => ?string, 'cover' => ?string]
 
         foreach (self::librariesOfType($type, $allowedLibraryIds, $libraryId) as $lib) {
             $stmt = Database::connection()->prepare('SELECT path, cover_path FROM items WHERE library_id = ?');
@@ -148,17 +104,19 @@ final class LibraryGroups
                 $relative = self::relativeToLibrary($row['path'], $lib['path']);
                 $segments = explode('/', $relative);
                 array_pop($segments); // drop the filename itself — only folder levels matter here
-                if (count($segments) <= $segmentIndex) {
-                    continue; // this item isn't nested deep enough to have this level at all
-                }
-                if ($publisherFilter !== null && ($segments[0] ?? null) !== $publisherFilter) {
-                    continue;
+                if (count($segments) <= $depth || array_slice($segments, 0, $depth) !== $pathPrefix) {
+                    continue; // doesn't sit under $pathPrefix at all, or doesn't go one level deeper than it
                 }
 
-                $name = $segments[$segmentIndex];
+                $name = $segments[$depth];
                 if (!isset($groups[$name])) {
-                    $dirSegments = array_slice($segments, 0, $segmentIndex + 1);
+                    $dirSegments = array_slice($segments, 0, $depth + 1);
                     $groups[$name] = [
+                        // kept alongside the array key rather than read back from it: a folder
+                        // named e.g. "2000" would otherwise come back as the *integer* 2000 —
+                        // PHP silently casts purely-numeric string array keys to int — and break
+                        // the strnatcasecmp() sort below, which requires a string.
+                        'name' => $name,
                         'count' => 0,
                         'absDir' => $libRoot . '/' . implode('/', $dirSegments),
                         'sortKey' => null,
@@ -174,15 +132,52 @@ final class LibraryGroups
         }
 
         $result = [];
-        foreach ($groups as $name => $g) {
+        foreach ($groups as $g) {
             $result[] = [
-                'name' => $name,
+                'name' => $g['name'],
                 'count' => $g['count'],
                 'thumbnail' => self::resolveThumbnail($g['absDir'], $g['cover']),
             ];
         }
         usort($result, fn($a, $b) => strnatcasecmp($a['name'], $b['name']));
         return $result;
+    }
+
+    /**
+     * Item ids nested under $pathPrefix — a list of folder segments below
+     * whichever library each item belongs to. Matching is done in PHP
+     * rather than as a SQL LIKE pattern deliberately: a wildcard-anywhere
+     * pattern risks a false match if a folder name happened to appear as
+     * a substring elsewhere in some other item's path.
+     *
+     * $exactDepthOnly = false (the default, used for actually browsing a
+     * chosen éditeur/collection/sous-collection) matches anything nested
+     * under $pathPrefix however deep. true matches only items sitting
+     * directly in that exact folder with no further subfolder — the
+     * standalone tomes shown alongside a level's subfolder tiles.
+     * @param list<string> $pathPrefix
+     * @return list<int>
+     */
+    public static function itemIdsMatching(string $type, ?array $allowedLibraryIds, array $pathPrefix, bool $exactDepthOnly = false, ?int $libraryId = null): array
+    {
+        $depth = count($pathPrefix);
+        $ids = [];
+        foreach (self::librariesOfType($type, $allowedLibraryIds, $libraryId) as $lib) {
+            $stmt = Database::connection()->prepare('SELECT id, path FROM items WHERE library_id = ?');
+            $stmt->execute([$lib['id']]);
+            foreach ($stmt->fetchAll() as $row) {
+                $segments = explode('/', self::relativeToLibrary($row['path'], $lib['path']));
+                array_pop($segments); // filename
+                if (count($segments) < $depth || array_slice($segments, 0, $depth) !== $pathPrefix) {
+                    continue;
+                }
+                if ($exactDepthOnly && count($segments) !== $depth) {
+                    continue;
+                }
+                $ids[] = (int) $row['id'];
+            }
+        }
+        return $ids;
     }
 
     private static function resolveThumbnail(string $absDir, ?string $fallbackCoverPath): ?string

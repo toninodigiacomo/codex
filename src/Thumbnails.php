@@ -2,37 +2,113 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Settings.php';
+
 /**
- * Writes extracted cover bytes straight to disk, at their original
- * resolution and format — no resizing.
+ * Resizes cover art down to a size that actually makes sense for a grid
+ * tile, via GD — installed at container startup (see compose.yml, same
+ * `docker-php-ext-install` pattern already used there for pdo_sqlite and
+ * simplexml) rather than baked into a custom image, so it follows the
+ * same reliability trade-off already accepted for those: a package
+ * mirror being briefly unreachable on some reboot means thumbnails
+ * temporarily fall back to full-resolution covers, never a broken app.
  *
- * This deliberately doesn't use GD. Resizing would need it, and unlike
- * the ZIP-reading problem (MiniZip.php) — where the format itself was
- * simple enough to reimplement in pure PHP — GD has no such shortcut:
- * getting it working means compiling it against zlib/libpng/libjpeg dev
- * headers that the base php:8.2-apache image doesn't ship, which in turn
- * means network access and a compiler at *every container recreation*
- * (the compiled extension lives in the container's writable layer, which
- * doesn't survive `docker compose down && up`, only a plain restart) —
- * a real reliability cost for a "nice to have". Serving full-resolution
- * cover art costs a bit more bandwidth per grid tile; on a personal home
- * server that's a fine trade for never having a working feature turn into
- * a broken one because a package mirror was unreachable on some reboot.
+ * Every write path in here degrades the same way on any failure —
+ * GD missing, a corrupt image, an unsupported format GD can't decode —
+ * falling back to saving the original bytes untouched. A cover that's
+ * merely bigger than ideal is always preferable to no cover at all.
  */
 final class Thumbnails
 {
+    private const JPEG_QUALITY = 82;
+
     public static function available(): bool
     {
-        return true; // no dependency to check for anymore
+        return extension_loaded('gd');
     }
 
-    /** Writes $imageData to $destAbsolutePath as-is, creating the destination folder if needed. */
-    public static function save(string $imageData, string $destAbsolutePath): bool
+    /**
+     * Saves $imageData under $destDir as "$baseName.<ext>" — a resized
+     * JPEG when GD is available and can decode the image, the original
+     * bytes under $originalExt otherwise. Returns the extension actually
+     * written (the caller needs this for cover_path — a resized image is
+     * always a .jpg regardless of what it started as), or null on failure.
+     */
+    public static function save(string $imageData, string $destDir, string $baseName, string $originalExt): ?string
     {
-        $dir = dirname($destAbsolutePath);
-        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-            return false;
+        if (!is_dir($destDir) && !mkdir($destDir, 0775, true) && !is_dir($destDir)) {
+            return null;
         }
-        return file_put_contents($destAbsolutePath, $imageData) !== false;
+        if (self::available()) {
+            $resized = self::resize($imageData);
+            if ($resized !== null) {
+                return file_put_contents($destDir . '/' . $baseName . '.jpg', $resized) !== false ? 'jpg' : null;
+            }
+        }
+        return file_put_contents($destDir . '/' . $baseName . '.' . $originalExt, $imageData) !== false ? $originalExt : null;
+    }
+
+    /**
+     * Reads $absPath off disk and returns it resized as JPEG bytes, or
+     * null if GD is unavailable or can't make sense of the file — the
+     * caller's own fallback (serving the file as-is) takes over either
+     * way. Used for folder.jpg-style thumbnails, which — unlike extracted
+     * covers — live in read-only library folders and can't be resized
+     * once and saved next to the source; the caller is expected to cache
+     * the result itself.
+     */
+    public static function resizeFile(string $absPath): ?string
+    {
+        if (!self::available()) {
+            return null;
+        }
+        $data = @file_get_contents($absPath);
+        return $data === false ? null : self::resize($data);
+    }
+
+    /** @return string|null resized JPEG bytes, or null if GD is unavailable or couldn't decode $imageData */
+    private static function resize(string $imageData): ?string
+    {
+        if (!self::available()) {
+            return null;
+        }
+        $image = @imagecreatefromstring($imageData);
+        if ($image === false) {
+            return null;
+        }
+        $width = imagesx($image);
+        $height = imagesy($image);
+        if ($width <= 0 || $height <= 0) {
+            imagedestroy($image);
+            return null;
+        }
+
+        // "Contain" within the configured box — scale by whichever axis is
+        // more constraining for this particular image's own aspect ratio,
+        // never upscale a cover that's already smaller than the box. The
+        // display side (library.css) crops to fill its tile via
+        // object-fit: cover, so the result doesn't need to exactly match
+        // the box's own aspect ratio, just fit within it.
+        $targetWidth = Settings::thumbnailWidth();
+        $targetHeight = Settings::thumbnailHeight();
+        $scale = min($targetWidth / $width, $targetHeight / $height, 1.0);
+        if ($scale < 1.0) {
+            $newWidth = max(1, (int) round($width * $scale));
+            $newHeight = max(1, (int) round($height * $scale));
+            $canvas = imagecreatetruecolor($newWidth, $newHeight);
+            // Flattens any transparency onto white first — a comic cover is
+            // never meaningfully transparent, and a JPEG can't hold alpha
+            // anyway; without this, a transparent source renders black.
+            imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+            imagecopyresampled($canvas, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+            imagedestroy($image);
+            $image = $canvas;
+        }
+
+        ob_start();
+        $written = imagejpeg($image, null, self::JPEG_QUALITY);
+        $data = ob_get_clean();
+        imagedestroy($image);
+        return $written && $data !== false ? $data : null;
     }
 }

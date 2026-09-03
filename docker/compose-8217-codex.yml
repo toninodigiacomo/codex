@@ -36,7 +36,8 @@ services:
         chmod -R a+rwX /var/www/html/data /var/www/html/public/assets || true;
         php -m | grep -qi pdo_sqlite || docker-php-ext-install pdo_sqlite || echo 'WARN: pdo_sqlite install failed, continuing anyway';
         php -m | grep -qi simplexml || docker-php-ext-install simplexml || echo 'WARN: simplexml install failed, continuing anyway';
-        php -m | grep -qi '^gd$' || docker-php-ext-install gd || echo 'WARN: gd install failed, continuing anyway';
+        which pdftoppm >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends poppler-utils) || echo 'WARN: poppler-utils install failed, PDF pages will not render';
+        php -m | grep -qiw gd || (apt-get update && apt-get install -y --no-install-recommends libpng-dev libjpeg-dev libwebp-dev && docker-php-ext-configure gd --with-jpeg --with-webp && docker-php-ext-install gd) || echo 'WARN: gd install failed, covers will be served at full resolution instead of as thumbnails';
         a2enmod rewrite headers || true;
         exec apache2-foreground
       "

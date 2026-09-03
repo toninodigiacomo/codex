@@ -63,21 +63,42 @@
 #resultCount { font-size: 12.5px; margin: 0 0 var(--space-4); font-weight: 600; }
 
 .item-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb-w, 165px), 1fr));
   gap: var(--space-4) var(--space-3);
+  /* Caps at N columns' worth of width (N = the admin's "Densité des grilles"
+     setting, see library.js's applyDisplaySettings) and centers within
+     whatever space .main-area actually has — auto-fill still reduces the
+     column count responsively below that on a narrower window, it just
+     never grows past N on a wide one. */
+  max-width: var(--grid-max-width, 1650px);
+  margin-left: auto; margin-right: auto;
 }
 .item-grid[hidden] { display: none; }
 
 .shelf { margin-bottom: var(--space-8); }
 .shelf-title { font-size: 18px; margin: 0 0 var(--space-4); padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-divider); }
 
-.shelf-row-wrap { position: relative; }
+.shelf-row-wrap {
+  position: relative;
+  /* Same idea as .item-grid's max-width: caps how many tiles are visible
+     before the row needs a horizontal scroll, and centers that viewport —
+     the row itself still holds every fetched item, this just clips it. */
+  max-width: var(--shelf-max-width, 1650px);
+  margin-left: auto; margin-right: auto;
+}
 .shelf-row {
-  display: flex; gap: var(--space-3); overflow-x: auto; scroll-snap-type: x proximity;
+  /* grid-auto-flow: column rather than a plain flex row: with more than
+     one row (--shelf-rows, the admin's "Rangées par étagère"), a tile
+     needs to fill a whole column before wrapping to the next one, so
+     scrolling stays horizontal-only regardless of row count. At the
+     default of 1 row this behaves exactly like the old flex row did. */
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--shelf-rows, 1), auto);
+  grid-auto-columns: var(--thumb-w, 165px);
+  gap: var(--space-3); overflow-x: auto; scroll-snap-type: x proximity;
   scrollbar-width: none; padding-bottom: 2px; width: 100%; min-width: 0;
 }
 .shelf-row::-webkit-scrollbar { display: none; }
-.shelf-row .item-card { flex: 0 0 150px; width: 150px; scroll-snap-align: start; }
+.shelf-row .item-card { width: var(--thumb-w, 165px); scroll-snap-align: start; }
 .shelf-arrow {
   position: absolute; top: 0; bottom: 0; width: 44px; border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-text);
@@ -91,7 +112,10 @@
 
 .item-card { text-decoration: none; color: var(--color-text); display: flex; flex-direction: column; }
 .item-cover {
-  aspect-ratio: 2 / 3; width: 100%; border-radius: var(--radius-md); overflow: hidden;
+  /* 25:36 (i.e. 1:1.44) rather than the more common 2:3 for a comic cover —
+     matches the admin's configured thumbnail width/height exactly, see
+     Settings::thumbnailHeight(). */
+  aspect-ratio: 25 / 36; width: 100%; border-radius: var(--radius-md); overflow: hidden;
   background: var(--color-surface); display: flex; align-items: center; justify-content: center;
   position: relative; margin-bottom: var(--space-2); box-shadow: var(--shadow-sm);
   transition: transform 0.15s ease, box-shadow 0.15s ease;

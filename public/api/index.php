@@ -111,6 +111,16 @@ function currentUserAllowedLibraries(): ?array
     return $user['library_ids'] ?? [];
 }
 
+/** The éditeur nav's folder path travels as a JSON-encoded array of segments (e.g. ["Panini Books","Marvel"]) — a single delimited string would break on a folder name that itself contains the delimiter. Anything malformed or not a list of strings is treated as the root. */
+function decodeGroupPath(string $raw): array
+{
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    return array_values(array_map('strval', $decoded));
+}
+
 /** Fetches an item and enforces the same library-access rule as the single-item GET route — a 404, not 403, so an out-of-scope item's existence isn't revealed. Ends the request itself on failure. */
 function requireItemAccess(int $id): array
 {
@@ -133,7 +143,7 @@ try {
                 // everything else about /api/items (single-item read for editing,
                 // create, update, delete, metadata/cover extraction) stays open to them.
                 Auth::requireReaderApi();
-                $limit = min(200, max(1, (int) ($_GET['limit'] ?? 60)));
+                $limit = min(300, max(1, (int) ($_GET['limit'] ?? 60)));
                 $offset = max(0, (int) ($_GET['offset'] ?? 0));
                 $filters = array_filter([
                     'type' => $_GET['type'] ?? null,
@@ -150,19 +160,12 @@ try {
                     $filters['library_ids'] = $allowedLibraryIds;
                 }
                 $groupLibraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
-                if (isset($_GET['publisher']) && $_GET['publisher'] !== '' && !empty($filters['type'])) {
-                    // no_collection=1 means "standalone tomes sitting directly under this
-                    // éditeur, with no collection subfolder" — the items shown alongside
-                    // the collection tiles rather than reached through one of them.
-                    $collection = !empty($_GET['no_collection'])
-                        ? false
-                        : (isset($_GET['collection']) && $_GET['collection'] !== '' ? (string) $_GET['collection'] : null);
-                    $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], $allowedLibraryIds, (string) $_GET['publisher'], $collection, $groupLibraryId);
-                    if (!$filters['ids']) {
-                        respond(200, ['items' => [], 'total' => 0]);
-                    }
-                } elseif (isset($_GET['collection']) && $_GET['collection'] !== '' && !empty($filters['type'])) {
-                    $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], $allowedLibraryIds, null, (string) $_GET['collection'], $groupLibraryId);
+                if (isset($_GET['path']) && $_GET['path'] !== '' && !empty($filters['type'])) {
+                    $path = decodeGroupPath((string) $_GET['path']);
+                    // exact=1 means "standalone tomes sitting directly under this exact
+                    // folder, with no further subfolder" — the items shown alongside a
+                    // level's subfolder tiles rather than reached through one of them.
+                    $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], $allowedLibraryIds, $path, !empty($_GET['exact']), $groupLibraryId);
                     if (!$filters['ids']) {
                         respond(200, ['items' => [], 'total' => 0]);
                     }
@@ -296,7 +299,18 @@ try {
 
         case 'libraries':
             if ($method === 'GET' && $id === null) {
-                respond(200, Libraries::all());
+                $libs = Libraries::all();
+                // One item_count per library, added here rather than in Libraries::all()
+                // itself — that method is also used by callers (sync, the éditeur nav)
+                // that have no use for it and would pay for the join every time.
+                $counts = Database::connection()
+                    ->query('SELECT library_id, COUNT(*) AS c FROM items GROUP BY library_id')
+                    ->fetchAll(PDO::FETCH_KEY_PAIR);
+                foreach ($libs as &$lib) {
+                    $lib['item_count'] = $counts[$lib['id']] ?? 0;
+                }
+                unset($lib);
+                respond(200, $libs);
             }
             if ($method === 'POST' && $id === null) {
                 Auth::requireAdminApi();
@@ -351,11 +365,47 @@ try {
                 $remainingStmt->execute([$id]);
                 respond(200, ['processed' => count($batch), 'remaining' => (int) $remainingStmt->fetchColumn()]);
             }
+            if ($method === 'POST' && $id !== null && $action === 'regenerate-covers') {
+                // Separate from extract-missing on purpose: that one only ever
+                // touches items that were never processed at all (metadata_checked_at
+                // IS NULL). This one re-extracts the cover for every item regardless,
+                // which is what's needed to shrink covers that were saved at full
+                // resolution before GD became available — offset-paginated rather
+                // than gated by a "done" flag, since there isn't one for this.
+                Auth::requireAdminOrSyncTokenApi();
+                $lib = Libraries::find($id);
+                if (!$lib) {
+                    respond(404, ['error' => 'Bibliothèque introuvable']);
+                }
+                $limit = min(100, max(1, (int) ($_GET['limit'] ?? 25)));
+                $offset = max(0, (int) ($_GET['offset'] ?? 0));
+                $pdo = Database::connection();
+                $stmt = $pdo->prepare('SELECT * FROM items WHERE library_id = :lib ORDER BY id LIMIT :lim OFFSET :off');
+                $stmt->bindValue(':lib', $id, PDO::PARAM_INT);
+                $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+                $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
+                $stmt->execute();
+                $batch = $stmt->fetchAll();
+                foreach ($batch as $item) {
+                    ItemEnrichment::extractAndSaveCover($item);
+                }
+                $totalStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ?');
+                $totalStmt->execute([$id]);
+                respond(200, ['processed' => count($batch), 'offset' => $offset + count($batch), 'total' => (int) $totalStmt->fetchColumn()]);
+            }
             respond(405, ['error' => 'Méthode non autorisée']);
 
         case 'display-settings':
             if ($method === 'GET') {
-                respond(200, ['show_publishers' => Settings::showPublishers()]);
+                respond(200, [
+                    'show_publishers' => Settings::showPublishers(),
+                    'thumbnail_width' => Settings::thumbnailWidth(),
+                    'thumbnail_height' => Settings::thumbnailHeight(),
+                    'grid_columns' => Settings::gridColumns(),
+                    'grid_page_size' => Settings::gridPageSize(),
+                    'home_shelf_columns' => Settings::homeShelfColumns(),
+                    'home_shelf_rows' => Settings::homeShelfRows(),
+                ]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -370,7 +420,7 @@ try {
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
-        case 'publishers':
+        case 'subfolders':
             Auth::requireReaderApi();
             if ($method === 'GET') {
                 $type = (string) ($_GET['type'] ?? '');
@@ -378,20 +428,8 @@ try {
                     respond(400, ['error' => 'Paramètre type requis']);
                 }
                 $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
-                respond(200, LibraryGroups::listPublishers($type, currentUserAllowedLibraries(), $libraryId));
-            }
-            respond(405, ['error' => 'Méthode non autorisée']);
-
-        case 'collections':
-            Auth::requireReaderApi();
-            if ($method === 'GET') {
-                $type = (string) ($_GET['type'] ?? '');
-                if ($type === '') {
-                    respond(400, ['error' => 'Paramètre type requis']);
-                }
-                $publisher = isset($_GET['publisher']) && $_GET['publisher'] !== '' ? (string) $_GET['publisher'] : null;
-                $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
-                respond(200, LibraryGroups::listCollections($type, currentUserAllowedLibraries(), $publisher, $libraryId));
+                $path = isset($_GET['path']) && $_GET['path'] !== '' ? decodeGroupPath((string) $_GET['path']) : [];
+                respond(200, LibraryGroups::listSubfolders($type, currentUserAllowedLibraries(), $libraryId, $path));
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -426,6 +464,29 @@ try {
                     respond(404, ['error' => 'Introuvable']);
                 }
                 $mimeTypes = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+
+                // folder.jpg etc. live in the read-only library mount, so unlike an
+                // extracted cover they can't be resized once and saved next to the
+                // source — cache the resized copy here instead, keyed on the source's
+                // own mtime so a replaced folder.jpg invalidates it automatically.
+                if (Thumbnails::available()) {
+                    $publicDir = realpath(__DIR__ . '/..');
+                    $cacheDir = $publicDir . '/assets/folder-thumbs';
+                    $cachePath = $cacheDir . '/' . sha1($requested) . '-' . filemtime($abs) . '-' . Settings::thumbnailWidth() . '.jpg';
+                    if (!is_file($cachePath)) {
+                        $resized = Thumbnails::resizeFile($abs);
+                        if ($resized !== null && (is_dir($cacheDir) || @mkdir($cacheDir, 0775, true))) {
+                            @file_put_contents($cachePath, $resized);
+                        }
+                    }
+                    if (is_file($cachePath)) {
+                        header('Content-Type: image/jpeg');
+                        header('Cache-Control: private, max-age=86400');
+                        readfile($cachePath);
+                        exit;
+                    }
+                }
+
                 header('Content-Type: ' . $mimeTypes[$ext]);
                 header('Cache-Control: private, max-age=3600');
                 readfile($abs);
@@ -670,6 +731,13 @@ try {
                 $config['scan_exclude_pattern'] = Settings::scanExcludePattern();
                 $config['show_publishers'] = Settings::showPublishers();
                 $config['show_empty_libraries_nav'] = Settings::showEmptyLibrariesInNav();
+                $config['thumbnail_width'] = Settings::thumbnailWidth();
+                $config['thumbnail_height'] = Settings::thumbnailHeight();
+                $config['grid_columns'] = Settings::gridColumns();
+                $config['grid_page_size'] = Settings::gridPageSize();
+                $config['home_shelf_columns'] = Settings::homeShelfColumns();
+                $config['home_shelf_rows'] = Settings::homeShelfRows();
+                $config['gd_available'] = Thumbnails::available();
                 respond(200, $config);
             }
             if ($method === 'PUT') {
@@ -694,6 +762,26 @@ try {
                 if (isset($body['show_empty_libraries_nav'])) {
                     Settings::setShowEmptyLibrariesInNav((bool) $body['show_empty_libraries_nav']);
                     unset($body['show_empty_libraries_nav']);
+                }
+                if (isset($body['thumbnail_width'])) {
+                    Settings::setThumbnailWidth((int) $body['thumbnail_width']);
+                    unset($body['thumbnail_width']);
+                }
+                if (isset($body['grid_columns'])) {
+                    Settings::setGridColumns((int) $body['grid_columns']);
+                    unset($body['grid_columns']);
+                }
+                if (isset($body['grid_page_size'])) {
+                    Settings::setGridPageSize((int) $body['grid_page_size']);
+                    unset($body['grid_page_size']);
+                }
+                if (isset($body['home_shelf_columns'])) {
+                    Settings::setHomeShelfColumns((int) $body['home_shelf_columns']);
+                    unset($body['home_shelf_columns']);
+                }
+                if (isset($body['home_shelf_rows'])) {
+                    Settings::setHomeShelfRows((int) $body['home_shelf_rows']);
+                    unset($body['home_shelf_rows']);
                 }
                 if (isset($body['smtp_password']) && trim((string) $body['smtp_password']) === '') {
                     unset($body['smtp_password']); // blank = "leave unchanged", not "clear it"

@@ -53,7 +53,7 @@
 .folder-picker-item:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
 
 .admin-form { display: flex; flex-direction: column; gap: 12px; }
-.admin-form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.admin-form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
 .admin-form-row .field { flex: 1; min-width: 160px; }
 .lib-checks { display: flex; flex-wrap: wrap; gap: 8px; }
 .lib-check { display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--color-surface-raised); padding: 6px 12px; border-radius: 999px; cursor: pointer; }
