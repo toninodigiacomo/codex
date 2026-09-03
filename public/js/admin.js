@@ -737,32 +737,46 @@
         <div class="admin-card">
           <h2>Densité des grilles</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Les grilles (page de navigation classique et éditeur/collection) tiennent sur un nombre de colonnes
-            fixe, centrées, et paginent au-delà du total défini. Les étagères de la page d'accueil chargent
-            toujours 60 objets récents par type, mais n'en montrent qu'une partie sans avoir à faire défiler
-            horizontalement.
+            La page de navigation classique et les grilles éditeur/collection tiennent sur un nombre de
+            colonnes fixe, centrées, et paginent au-delà du total défini ci-dessous.
           </p>
           <div class="admin-form-row">
-            <div class="field">
-              <label for="gridColumns">Colonnes des grilles</label>
+            <div class="field" style="flex:0 0 auto;">
+              <label for="gridColumns">Colonnes</label>
               <input class="input" id="gridColumns" type="number" min="1" max="15" value="${esc(s.grid_columns)}" style="width:100px;" />
             </div>
-            <div class="field">
-              <label for="gridPageSize">Objets max par page de grille</label>
+            <div class="field" style="flex:0 0 auto;">
+              <label for="gridPageSize">Objets max par page</label>
               <input class="input" id="gridPageSize" type="number" min="1" max="300" value="${esc(s.grid_page_size)}" style="width:120px;" />
             </div>
+            <div style="margin-left:auto;">
+              <button type="button" class="btn btn-secondary" id="saveGridDensityBtn">Enregistrer</button>
+            </div>
           </div>
+        </div>
+        <div class="admin-card">
+          <h2>Étagères de la page d'accueil</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Les rangées « Bandes Dessinées récentes », « Ebooks récents »... de la page d'accueil. « Objets
+            chargés » définit combien d'objets récents sont récupérés au total (le maximum atteignable en
+            faisant défiler) ; « Colonnes visibles » et « Rangées visibles » définissent combien de ces objets
+            s'affichent avant qu'il faille faire défiler horizontalement pour voir les suivants.
+          </p>
           <div class="admin-form-row">
-            <div class="field">
-              <label for="homeShelfColumns">Colonnes visibles par étagère</label>
+            <div class="field" style="flex:0 0 auto;">
+              <label for="homeShelfFetchLimit">Objets chargés</label>
+              <input class="input" id="homeShelfFetchLimit" type="number" min="40" max="120" value="${esc(s.home_shelf_fetch_limit)}" style="width:100px;" />
+            </div>
+            <div class="field" style="flex:0 0 auto;">
+              <label for="homeShelfColumns">Colonnes visibles</label>
               <input class="input" id="homeShelfColumns" type="number" min="1" max="15" value="${esc(s.home_shelf_columns)}" style="width:100px;" />
             </div>
-            <div class="field">
-              <label for="homeShelfRows">Rangées par étagère</label>
+            <div class="field" style="flex:0 0 auto;">
+              <label for="homeShelfRows">Rangées visibles</label>
               <input class="input" id="homeShelfRows" type="number" min="1" max="5" value="${esc(s.home_shelf_rows)}" style="width:100px;" />
             </div>
-            <div>
-              <button type="button" class="btn btn-secondary" id="saveGridDensityBtn">Enregistrer</button>
+            <div style="margin-left:auto;">
+              <button type="button" class="btn btn-secondary" id="saveHomeShelfBtn">Enregistrer</button>
             </div>
           </div>
         </div>
@@ -865,28 +879,41 @@
       document.getElementById('saveGridDensityBtn').addEventListener('click', async () => {
         const gridColumns = Number(document.getElementById('gridColumns').value);
         const gridSize = Number(document.getElementById('gridPageSize').value);
-        const shelfColumns = Number(document.getElementById('homeShelfColumns').value);
-        const shelfRows = Number(document.getElementById('homeShelfRows').value);
         if (!gridColumns || gridColumns < 1 || gridColumns > 15) {
-          showToast('Le nombre de colonnes des grilles doit être compris entre 1 et 15.', true);
+          showToast('Le nombre de colonnes doit être compris entre 1 et 15.', true);
           return;
         }
         if (!gridSize || gridSize < 1 || gridSize > 300) {
           showToast('Le nombre d\u2019objets par page doit être compris entre 1 et 300.', true);
           return;
         }
+        try {
+          await api('PUT', '/api/settings', { grid_columns: gridColumns, grid_page_size: gridSize });
+          showToast('Enregistré.');
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('saveHomeShelfBtn').addEventListener('click', async () => {
+        const fetchLimit = Number(document.getElementById('homeShelfFetchLimit').value);
+        const shelfColumns = Number(document.getElementById('homeShelfColumns').value);
+        const shelfRows = Number(document.getElementById('homeShelfRows').value);
+        if (!fetchLimit || fetchLimit < 40 || fetchLimit > 120) {
+          showToast('Le nombre d\u2019objets chargés doit être compris entre 40 et 120.', true);
+          return;
+        }
         if (!shelfColumns || shelfColumns < 1 || shelfColumns > 15) {
-          showToast('Le nombre de colonnes visibles par étagère doit être compris entre 1 et 15.', true);
+          showToast('Le nombre de colonnes visibles doit être compris entre 1 et 15.', true);
           return;
         }
         if (!shelfRows || shelfRows < 1 || shelfRows > 5) {
-          showToast('Le nombre de rangées par étagère doit être compris entre 1 et 5.', true);
+          showToast('Le nombre de rangées visibles doit être compris entre 1 et 5.', true);
           return;
         }
         try {
           await api('PUT', '/api/settings', {
-            grid_columns: gridColumns,
-            grid_page_size: gridSize,
+            home_shelf_fetch_limit: fetchLimit,
             home_shelf_columns: shelfColumns,
             home_shelf_rows: shelfRows,
           });

@@ -405,6 +405,7 @@ try {
                     'grid_page_size' => Settings::gridPageSize(),
                     'home_shelf_columns' => Settings::homeShelfColumns(),
                     'home_shelf_rows' => Settings::homeShelfRows(),
+                    'home_shelf_fetch_limit' => Settings::homeShelfFetchLimit(),
                 ]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
@@ -737,6 +738,7 @@ try {
                 $config['grid_page_size'] = Settings::gridPageSize();
                 $config['home_shelf_columns'] = Settings::homeShelfColumns();
                 $config['home_shelf_rows'] = Settings::homeShelfRows();
+                $config['home_shelf_fetch_limit'] = Settings::homeShelfFetchLimit();
                 $config['gd_available'] = Thumbnails::available();
                 respond(200, $config);
             }
@@ -782,6 +784,10 @@ try {
                 if (isset($body['home_shelf_rows'])) {
                     Settings::setHomeShelfRows((int) $body['home_shelf_rows']);
                     unset($body['home_shelf_rows']);
+                }
+                if (isset($body['home_shelf_fetch_limit'])) {
+                    Settings::setHomeShelfFetchLimit((int) $body['home_shelf_fetch_limit']);
+                    unset($body['home_shelf_fetch_limit']);
                 }
                 if (isset($body['smtp_password']) && trim((string) $body['smtp_password']) === '') {
                     unset($body['smtp_password']); // blank = "leave unchanged", not "clear it"

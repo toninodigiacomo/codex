@@ -7,9 +7,9 @@
 
   const TYPE_LABELS = { comic: 'BD', ebook: 'Ebook', magazine: 'Magazine', other: 'Autre' };
   const HOME_SHELF_TYPES = ['comic', 'ebook', 'magazine', 'other'];
-  const HOME_SHELF_TYPES_FETCH_LIMIT = 60; // a full scrollable shelf's worth — how many are *visible* without scrolling is separate, see applyDisplaySettings
 
   let gridPageSize = 80; // replaced by display-settings once loaded, see applyDisplaySettings
+  let homeShelfFetchLimit = 60; // replaced by display-settings once loaded, see applyDisplaySettings
 
   const state = {
     mode: 'home', // 'home' | 'browse' | 'group'
@@ -41,6 +41,7 @@
     grid_page_size: 80,
     home_shelf_columns: 10,
     home_shelf_rows: 1,
+    home_shelf_fetch_limit: 60,
   };
 
   let libraries = [];
@@ -181,7 +182,7 @@
   async function loadHome() {
     const results = await Promise.all(
       HOME_SHELF_TYPES.map((type) =>
-        fetchJson(`/api/items?type=${type}&sort=added_at&dir=DESC&limit=${HOME_SHELF_TYPES_FETCH_LIMIT}`).catch(() => ({ items: [] }))
+        fetchJson(`/api/items?type=${type}&sort=added_at&dir=DESC&limit=${homeShelfFetchLimit}`).catch(() => ({ items: [] }))
       )
     );
 
@@ -629,6 +630,7 @@
     tags = tg;
     displaySettings = disp;
     gridPageSize = disp.grid_page_size || 80;
+    homeShelfFetchLimit = disp.home_shelf_fetch_limit || 60;
     applyDisplaySettings(disp);
     renderTypeTabs();
     syncSidebarActiveStates();

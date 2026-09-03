@@ -230,9 +230,8 @@ final class Settings
     /**
      * How many columns wide a home page shelf (Bandes Dessinées
      * récentes...) shows before the rest needs a horizontal scroll to
-     * reach — the shelf still fetches a full 60 regardless (see
-     * library.js), this only controls how many are visible without
-     * scrolling.
+     * reach — independent of homeShelfFetchLimit() below, which controls
+     * how many are fetched in the first place.
      */
     public static function homeShelfColumns(): int
     {
@@ -262,5 +261,23 @@ final class Settings
     public static function setHomeShelfRows(int $value): void
     {
         self::set('home_shelf_rows', (string) max(1, min(5, $value)));
+    }
+
+    /**
+     * How many of the most recent items a home page shelf fetches in
+     * total — homeShelfColumns()/homeShelfRows() above control how many
+     * of those are visible before scrolling, this controls how many
+     * exist to scroll through in the first place.
+     */
+    public static function homeShelfFetchLimit(): int
+    {
+        $stored = self::get('home_shelf_fetch_limit');
+        $value = $stored !== null ? (int) $stored : 60;
+        return $value > 0 ? $value : 60;
+    }
+
+    public static function setHomeShelfFetchLimit(int $value): void
+    {
+        self::set('home_shelf_fetch_limit', (string) max(40, min(120, $value)));
     }
 }
