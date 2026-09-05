@@ -40,7 +40,8 @@
     users: document.getElementById('panel-users'),
     libraries: document.getElementById('panel-libraries'),
     settings: document.getElementById('panel-settings'),
-    logs: document.getElementById('panel-logs'),
+    maintenance: document.getElementById('panel-maintenance'),
+    system: document.getElementById('panel-system'),
   };
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -52,7 +53,8 @@
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
       if (key === 'settings') renderSettingsTab();
-      if (key === 'logs') renderLogsTab();
+      if (key === 'maintenance') renderMaintenanceTab();
+      if (key === 'system') renderSystemTab();
     });
   });
 
@@ -361,6 +363,18 @@
     return new Intl.NumberFormat('fr-FR').format(n || 0);
   }
 
+  function formatBytes(bytes) {
+    if (!bytes) return '0 Ko';
+    const units = ['o', 'Ko', 'Mo', 'Go'];
+    let i = 0;
+    let n = bytes;
+    while (n >= 1024 && i < units.length - 1) {
+      n /= 1024;
+      i++;
+    }
+    return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  }
+
   /** Patches a library row's header line in place (path/date/count) without re-rendering the whole list, so the sync-result box just below it isn't wiped out. */
   async function refreshLibraryMeta(libId) {
     try {
@@ -424,6 +438,50 @@
       }
       box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
       return offset;
+    } finally {
+      jobEnded();
+    }
+  }
+
+  /**
+   * Shared with the per-row button and syncAllBtn. Batched (5 new files per
+   * call — see extractMissingForLibrary's note on why not more, the same
+   * per-file cover-extraction cost applies to a newly-found file during
+   * sync too) for the same two reasons as the other two "Tout ..." helpers:
+   * live progress, and staying safely under a reverse proxy's own upstream
+   * read timeout regardless of how slow any one file is to process.
+   * sync-all and the cron sync token still call LibraryScanner::sync()
+   * unbatched server-side — fine for a cron job with no browser/proxy
+   * round-trip waiting on it, but that's exactly what syncAllBtn used to do
+   * too, and why it doesn't anymore. $libPath is passed in explicitly
+   * (rather than looked up here) since both callers already have it and
+   * this function has no library list of its own to search.
+   */
+  async function syncLibrary(libId, box, libPath, onProgress = null) {
+    const metaEl = document.getElementById(`lib-meta-${libId}`);
+    let totalAdded = 0;
+    let totalUpdated = 0;
+    let allConflicted = [];
+    let lastRes = null;
+    jobStarted();
+    try {
+      while (true) {
+        const res = await api('POST', `/api/libraries/${libId}/sync?limit=5`);
+        totalAdded += res.added;
+        totalUpdated += res.updated || 0;
+        allConflicted = allConflicted.concat(res.conflicted || []);
+        lastRes = res;
+        const done = res.added + (res.updated || 0) + res.unchanged;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours... ${done}/${res.total}</p>`;
+        if (onProgress) onProgress(done, res.total);
+        if (metaEl && libPath) {
+          metaEl.textContent = `libraries/${libPath} — synchronisation en cours — ${done}/${res.total} objets`;
+        }
+        if (res.added === 0 && (res.updated || 0) === 0) break;
+      }
+      renderSyncResult(box, { ...lastRes, added: totalAdded, updated: totalUpdated, conflicted: allConflicted });
+      refreshLibraryMeta(libId);
+      return totalAdded + totalUpdated;
     } finally {
       jobEnded();
     }
@@ -510,7 +568,7 @@
           } else if (job.job_type === 'extract-missing') {
             await extractMissingForLibrary(libId, box);
           } else {
-            await syncLibrary(libId, box);
+            await syncLibrary(libId, box, undefined);
           }
         } catch (err) {
           showToast(err.message, true);
@@ -598,7 +656,7 @@
             box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}...</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
             try {
-              grandTotal += await syncLibrary(lib.id, libBox, (done, total) => {
+              grandTotal += await syncLibrary(lib.id, libBox, lib.path, (done, total) => {
                 box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}... ${done}${total ? ` / ${total}` : ''}</p>`;
               });
             } catch (err) {
@@ -764,57 +822,15 @@
 
     libraries.forEach((l) => renderJobStatus(l.id, jobs[l.id]));
 
-  /**
-   * Shared with the per-row button and syncAllBtn below it. Batched (5 new
-   * files per call — see extractMissingForLibrary's note on why not more,
-   * the same per-file cover-extraction cost applies to a newly-found file
-   * during sync too) for the same two reasons as the other two "Tout ..."
-   * helpers: live progress, and staying safely under a reverse proxy's own
-   * upstream read timeout regardless of how slow any one file is to
-   * process. sync-all and the cron sync token still call
-   * LibraryScanner::sync() unbatched server-side — fine for a cron job
-   * with no browser/proxy round-trip waiting on it, but that's exactly
-   * what syncAllBtn used to do too, and why it doesn't anymore.
-   */
-  async function syncLibrary(libId, box, onProgress = null) {
-    const lib = libraries.find((l) => String(l.id) === String(libId));
-    const metaEl = document.getElementById(`lib-meta-${libId}`);
-    let totalAdded = 0;
-    let totalUpdated = 0;
-    let allConflicted = [];
-    let lastRes = null;
-    jobStarted();
-    try {
-      while (true) {
-        const res = await api('POST', `/api/libraries/${libId}/sync?limit=5`);
-        totalAdded += res.added;
-        totalUpdated += res.updated || 0;
-        allConflicted = allConflicted.concat(res.conflicted || []);
-        lastRes = res;
-        const done = res.added + (res.updated || 0) + res.unchanged;
-        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours... ${done}/${res.total}</p>`;
-        if (onProgress) onProgress(done, res.total);
-        if (lib && metaEl) {
-          metaEl.textContent = `libraries/${lib.path} — synchronisation en cours — ${done}/${res.total} objets`;
-        }
-        if (res.added === 0 && (res.updated || 0) === 0) break;
-      }
-      renderSyncResult(box, { ...lastRes, added: totalAdded, updated: totalUpdated, conflicted: allConflicted });
-      refreshLibraryMeta(libId);
-      return totalAdded + totalUpdated;
-    } finally {
-      jobEnded();
-    }
-  }
-
-  list.querySelectorAll('[data-sync-lib]').forEach((btn) => {
+    list.querySelectorAll('[data-sync-lib]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const libId = btn.dataset.syncLib;
         const box = document.getElementById(`sync-result-${libId}`);
+        const lib = libraries.find((l) => String(l.id) === String(libId));
         btn.disabled = true;
         box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
         try {
-          const totalAdded = await syncLibrary(libId, box);
+          const totalAdded = await syncLibrary(libId, box, lib ? lib.path : undefined);
           showToast(`Synchronisation terminée : ${totalAdded} ajouté(s).`);
         } catch (err) {
           box.innerHTML = '';
@@ -964,7 +980,7 @@
   }
 
   // ============================================================
-  // Settings (SMTP)
+  // Settings (display/behavior)
   // ============================================================
   async function renderSettingsTab() {
     const panel = panels.settings;
@@ -973,72 +989,6 @@
       const s = await api('GET', '/api/settings');
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>Envoi d'e-mails (SMTP)</h2>
-          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Nécessaire pour envoyer les liens d'invitation. Utilise un relais existant (Gmail, ton hébergeur, ...) — un conteneur n'a pas de serveur mail local fonctionnel.</p>
-          <form class="admin-form" id="smtpForm">
-            <div class="admin-form-row">
-              <div class="field">
-                <label for="smtpHost">Serveur SMTP</label>
-                <input class="input" id="smtpHost" value="${esc(s.smtp_host || '')}" placeholder="smtp.gmail.com" />
-              </div>
-              <div class="field">
-                <label for="smtpPort">Port</label>
-                <input class="input" id="smtpPort" value="${esc(s.smtp_port || '587')}" />
-              </div>
-              <div class="field">
-                <label for="smtpEncryption">Chiffrement</label>
-                <select class="input" id="smtpEncryption">
-                  <option value="starttls" ${s.smtp_encryption === 'starttls' ? 'selected' : ''}>STARTTLS</option>
-                  <option value="ssl" ${s.smtp_encryption === 'ssl' ? 'selected' : ''}>SSL/TLS implicite</option>
-                  <option value="none" ${s.smtp_encryption === 'none' ? 'selected' : ''}>Aucun</option>
-                </select>
-              </div>
-            </div>
-            <div class="admin-form-row">
-              <div class="field">
-                <label for="smtpUsername">Utilisateur SMTP</label>
-                <input class="input" id="smtpUsername" value="${esc(s.smtp_username || '')}" />
-              </div>
-              <div class="field">
-                <label for="smtpPassword">Mot de passe SMTP</label>
-                <input class="input" id="smtpPassword" type="password" placeholder="${s.smtp_password_set ? '•••••••• (laisser vide pour conserver)' : ''}" />
-              </div>
-            </div>
-            <div class="admin-form-row">
-              <div class="field">
-                <label for="smtpFromEmail">Adresse d'expédition</label>
-                <input class="input" id="smtpFromEmail" type="email" value="${esc(s.smtp_from_email || '')}" placeholder="codex@example.com" />
-              </div>
-              <div class="field">
-                <label for="smtpFromName">Nom d'expéditeur</label>
-                <input class="input" id="smtpFromName" value="${esc(s.smtp_from_name || 'Codex')}" />
-              </div>
-            </div>
-            <div class="field">
-              <label for="siteUrl">Adresse du site (pour les liens d'invitation)</label>
-              <input class="input" id="siteUrl" value="${esc(s.site_url || '')}" />
-            </div>
-            <div>
-              <button type="submit" class="btn btn-primary">Enregistrer</button>
-            </div>
-          </form>
-        </div>
-        <div class="admin-card">
-          <h2>Tester l'envoi</h2>
-          <form class="admin-form" id="testForm">
-            <div class="admin-form-row">
-              <div class="field">
-                <label for="testEmail">Envoyer un e-mail de test à</label>
-                <input class="input" id="testEmail" type="email" required />
-              </div>
-            </div>
-            <div>
-              <button type="submit" class="btn btn-secondary">Envoyer le test</button>
-            </div>
-            <div id="testResult"></div>
-          </form>
-        </div>
-        <div class="admin-card">
           <h2>Miniatures</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
             Taille des miniatures affichées dans les grilles — couvertures des objets et vignettes
@@ -1046,7 +996,7 @@
             l'admin. La hauteur suit toujours automatiquement, au ratio 25:36. ${
               s.gd_available
                 ? "Ne change que les miniatures générées à partir de maintenant : une nouvelle synchronisation en tient compte automatiquement, mais les couvertures déjà extraites ont besoin d'un clic sur « Régénérer les miniatures » (onglet Bibliothèques) pour être reprises à la nouvelle taille."
-                : "GD n'est pas disponible sur ce serveur (voir le conteneur) — les couvertures sont servies à leur résolution d'origine tant que ça n'est pas résolu ; ce réglage sera pris en compte dès que GD sera actif."
+                : "GD n'est pas disponible sur ce serveur (voir l'onglet Système) — les couvertures sont servies à leur résolution d'origine tant que ça n'est pas résolu ; ce réglage sera pris en compte dès que GD sera actif."
             }
           </p>
           <div class="field">
@@ -1329,6 +1279,97 @@
           showToast(err.message, true);
         }
       });
+    } catch (err) {
+      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+    }
+  }
+
+  // ============================================================
+  // Maintenance (backup + email)
+  // ============================================================
+  async function renderMaintenanceTab() {
+    const panel = panels.maintenance;
+    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    try {
+      const s = await api('GET', '/api/settings');
+      panel.innerHTML = `
+        <div class="admin-card">
+          <h2>Sauvegarde</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Un instantané complet et cohérent de la base de données (métadonnées, tags, progression de lecture,
+            réglages) — pas les fichiers des bibliothèques eux-mêmes, ni les couvertures/miniatures. À faire
+            régulièrement, surtout avant une manipulation risquée (suppression massive, changement de chemin
+            d'une bibliothèque).
+          </p>
+          <a class="btn btn-primary" href="/api/backup" download>Télécharger une sauvegarde</a>
+        </div>
+        <div class="admin-card">
+          <h2>Envoi d'e-mails (SMTP)</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Nécessaire pour envoyer les liens d'invitation. Utilise un relais existant (Gmail, ton hébergeur, ...) — un conteneur n'a pas de serveur mail local fonctionnel.</p>
+          <form class="admin-form" id="smtpForm">
+            <div class="admin-form-row">
+              <div class="field">
+                <label for="smtpHost">Serveur SMTP</label>
+                <input class="input" id="smtpHost" value="${esc(s.smtp_host || '')}" placeholder="smtp.gmail.com" />
+              </div>
+              <div class="field">
+                <label for="smtpPort">Port</label>
+                <input class="input" id="smtpPort" value="${esc(s.smtp_port || '587')}" />
+              </div>
+              <div class="field">
+                <label for="smtpEncryption">Chiffrement</label>
+                <select class="input" id="smtpEncryption">
+                  <option value="starttls" ${s.smtp_encryption === 'starttls' ? 'selected' : ''}>STARTTLS</option>
+                  <option value="ssl" ${s.smtp_encryption === 'ssl' ? 'selected' : ''}>SSL/TLS implicite</option>
+                  <option value="none" ${s.smtp_encryption === 'none' ? 'selected' : ''}>Aucun</option>
+                </select>
+              </div>
+            </div>
+            <div class="admin-form-row">
+              <div class="field">
+                <label for="smtpUsername">Utilisateur SMTP</label>
+                <input class="input" id="smtpUsername" value="${esc(s.smtp_username || '')}" />
+              </div>
+              <div class="field">
+                <label for="smtpPassword">Mot de passe SMTP</label>
+                <input class="input" id="smtpPassword" type="password" placeholder="${s.smtp_password_set ? '•••••••• (laisser vide pour conserver)' : ''}" />
+              </div>
+            </div>
+            <div class="admin-form-row">
+              <div class="field">
+                <label for="smtpFromEmail">Adresse d'expédition</label>
+                <input class="input" id="smtpFromEmail" type="email" value="${esc(s.smtp_from_email || '')}" placeholder="codex@example.com" />
+              </div>
+              <div class="field">
+                <label for="smtpFromName">Nom d'expéditeur</label>
+                <input class="input" id="smtpFromName" value="${esc(s.smtp_from_name || 'Codex')}" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="siteUrl">Adresse du site (pour les liens d'invitation)</label>
+              <input class="input" id="siteUrl" value="${esc(s.site_url || '')}" />
+            </div>
+            <div>
+              <button type="submit" class="btn btn-primary">Enregistrer</button>
+            </div>
+          </form>
+        </div>
+        <div class="admin-card">
+          <h2>Tester l'envoi</h2>
+          <form class="admin-form" id="testForm">
+            <div class="admin-form-row">
+              <div class="field">
+                <label for="testEmail">Envoyer un e-mail de test à</label>
+                <input class="input" id="testEmail" type="email" required />
+              </div>
+            </div>
+            <div>
+              <button type="submit" class="btn btn-secondary">Envoyer le test</button>
+            </div>
+            <div id="testResult"></div>
+          </form>
+        </div>
+      `;
 
       document.getElementById('smtpForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1366,50 +1407,111 @@
   }
 
   // ============================================================
-  // Logs
+  // System (status + security + logs, in that order — logs last since
+  // they're the "dig deeper" step, reached after the summary above
+  // already points at what's wrong)
   // ============================================================
-  async function renderLogsTab() {
-    const panel = panels.logs;
-    panel.innerHTML = `
-      <div class="admin-card">
-        <div class="admin-card-head">
-          <h2>Journaux</h2>
-          <div class="admin-row-actions-group">
-            <select class="input" id="logSelect" style="width:auto;">
-              <option value="error">Erreurs (error.log)</option>
-              <option value="access">Accès (access.log)</option>
-            </select>
-            <button class="btn btn-secondary btn-sm" id="logRefreshBtn">Rafraîchir</button>
+  async function renderSystemTab() {
+    const panel = panels.system;
+    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    try {
+      const [status, attempts] = await Promise.all([
+        api('GET', '/api/system-status'),
+        api('GET', '/api/login-attempts'),
+      ]);
+      panel.innerHTML = `
+        <div class="admin-card">
+          <h2>État du système</h2>
+          <table class="admin-table">
+            <tbody>
+              <tr><td>Version de PHP</td><td>${esc(status.php_version)}</td></tr>
+              <tr><td>Miniatures (GD)</td><td>${status.gd_available ? 'Disponible' : 'Indisponible — couvertures servies à leur résolution d\u2019origine'}</td></tr>
+              <tr><td>Rendu PDF (poppler-utils)</td><td>${status.poppler_available ? 'Disponible' : 'Indisponible — les PDF ne s\u2019afficheront pas'}</td></tr>
+              <tr><td>Envoi d'e-mails</td><td>${status.smtp_configured ? 'Configuré' : 'Non configuré — onglet Maintenance'}</td></tr>
+              <tr><td>Base de données</td><td>${formatBytes(status.db_size_bytes)}</td></tr>
+              <tr><td>Bibliothèques</td><td>${formatCount(status.library_count)}</td></tr>
+              <tr><td>Utilisateurs</td><td>${formatCount(status.user_count)}</td></tr>
+              <tr><td>Objets</td><td>${formatCount(status.item_count)} (${formatCount(status.items_missing_metadata)} sans métadonnées, ${formatCount(status.items_missing_cover)} sans couverture)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-card">
+          <h2>Tentatives de connexion</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Après 5 échecs, une adresse IP est bloquée 15 minutes. Si c'est la tienne, débloque-la ici plutôt que
+            d'attendre.
+          </p>
+          <div id="loginAttemptsList">
+            ${
+              attempts.length
+                ? attempts
+                    .map(
+                      (a) => `
+              <div class="admin-row-compact">
+                <span>${esc(a.ip)} — ${a.count} échec${a.count === 1 ? '' : 's'}${a.locked ? ` — <strong>bloquée encore ${Math.ceil(a.seconds_remaining / 60)} min</strong>` : ''}</span>
+                <button class="btn btn-secondary btn-sm" data-clear-attempt="${esc(a.ip)}">Débloquer</button>
+              </div>`
+                    )
+                    .join('')
+                : '<p class="text-muted" style="font-size:13px;">Aucune tentative échouée enregistrée.</p>'
+            }
           </div>
         </div>
-        <p class="text-muted" id="logPath" style="font-size:12.5px;margin-top:-8px;"></p>
-        <pre id="logContent" style="background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:12px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
-      </div>`;
+        <div class="admin-card">
+          <div class="admin-card-head">
+            <h2>Journaux</h2>
+            <div class="admin-row-actions-group">
+              <select class="input" id="logSelect" style="width:auto;">
+                <option value="error">Erreurs (error.log)</option>
+                <option value="access">Accès (access.log)</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="logRefreshBtn">Rafraîchir</button>
+            </div>
+          </div>
+          <p class="text-muted" id="logPath" style="font-size:12.5px;margin-top:-8px;"></p>
+          <pre id="logContent" style="background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:12px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
+        </div>
+      `;
 
-    const select = document.getElementById('logSelect');
-    const pathEl = document.getElementById('logPath');
-    const contentEl = document.getElementById('logContent');
+      document.querySelectorAll('[data-clear-attempt]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await api('DELETE', `/api/login-attempts?ip=${encodeURIComponent(btn.dataset.clearAttempt)}`);
+            showToast('IP débloquée.');
+            renderSystemTab();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      });
 
-    async function loadLogs() {
-      contentEl.textContent = 'Chargement...';
-      try {
-        const res = await api('GET', `/api/logs?log=${select.value}&lines=300`);
-        pathEl.textContent = res.path;
-        if (res.note) {
-          contentEl.textContent = res.note;
-        } else {
-          contentEl.textContent = res.lines.length ? res.lines.join('\n') : '(vide — aucune entrée)';
-          contentEl.scrollTop = contentEl.scrollHeight; // most recent entries are at the bottom, like a real tail
+      const select = document.getElementById('logSelect');
+      const pathEl = document.getElementById('logPath');
+      const contentEl = document.getElementById('logContent');
+
+      async function loadLogs() {
+        contentEl.textContent = 'Chargement...';
+        try {
+          const res = await api('GET', `/api/logs?log=${select.value}&lines=300`);
+          pathEl.textContent = res.path;
+          if (res.note) {
+            contentEl.textContent = res.note;
+          } else {
+            contentEl.textContent = res.lines.length ? res.lines.join('\n') : '(vide — aucune entrée)';
+            contentEl.scrollTop = contentEl.scrollHeight; // most recent entries are at the bottom, like a real tail
+          }
+        } catch (err) {
+          contentEl.textContent = '';
+          showToast(err.message, true);
         }
-      } catch (err) {
-        contentEl.textContent = '';
-        showToast(err.message, true);
       }
-    }
 
-    select.addEventListener('change', loadLogs);
-    document.getElementById('logRefreshBtn').addEventListener('click', loadLogs);
-    loadLogs();
+      select.addEventListener('change', loadLogs);
+      document.getElementById('logRefreshBtn').addEventListener('click', loadLogs);
+      loadLogs();
+    } catch (err) {
+      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+    }
   }
 
   renderUsersTab();

@@ -33,13 +33,15 @@ $me = Auth::currentUser();
       <button class="admin-tab active" data-tab="users">Utilisateurs</button>
       <button class="admin-tab" data-tab="libraries">Bibliothèques</button>
       <button class="admin-tab" data-tab="settings">Réglages</button>
-      <button class="admin-tab" data-tab="logs">Journaux</button>
+      <button class="admin-tab" data-tab="maintenance">Maintenance</button>
+      <button class="admin-tab" data-tab="system">Système</button>
     </div>
 
     <section id="panel-users" class="admin-panel"></section>
     <section id="panel-libraries" class="admin-panel" hidden></section>
     <section id="panel-settings" class="admin-panel" hidden></section>
-    <section id="panel-logs" class="admin-panel" hidden></section>
+    <section id="panel-maintenance" class="admin-panel" hidden></section>
+    <section id="panel-system" class="admin-panel" hidden></section>
   </main>
 </div>
 

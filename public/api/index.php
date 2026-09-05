@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../src/Mailer.php';
 require_once __DIR__ . '/../../src/LibraryScanner.php';
 require_once __DIR__ . '/../../src/ItemEnrichment.php';
 require_once __DIR__ . '/../../src/ItemPages.php';
+require_once __DIR__ . '/../../src/PdfRenderer.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
@@ -657,6 +658,76 @@ try {
                     respond(200, ['path' => $path, 'lines' => [], 'note' => "Le fichier existe mais n'est pas lisible par le processus PHP (permissions)."]);
                 }
                 respond(200, ['path' => $path, 'lines' => tailFile($path, $lines)]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'backup':
+            // A consistent snapshot even with concurrent writers — VACUUM INTO
+            // runs inside its own read transaction and is SQLite's own built-in
+            // way to do this; copying the raw file while WAL is active risks a
+            // torn, unusable copy. The target must not already exist, hence the
+            // timestamped filename — collisions across two backups in the same
+            // second are the only real risk, and vanishingly unlikely from a
+            // single admin clicking a button.
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $dataDir = realpath(__DIR__ . '/../../data');
+                $tmpPath = $dataDir . '/backup-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.sqlite';
+                register_shutdown_function(static function () use ($tmpPath) {
+                    @unlink($tmpPath); // always clean up the scratch copy, whether readfile finished, the connection dropped, or VACUUM itself failed partway
+                });
+                try {
+                    Database::connection()->exec('VACUUM INTO ' . Database::connection()->quote($tmpPath));
+                } catch (Throwable $e) {
+                    respond(500, ['error' => 'Échec de la sauvegarde : ' . $e->getMessage()]);
+                }
+                if (!is_file($tmpPath)) {
+                    respond(500, ['error' => "La sauvegarde n'a produit aucun fichier."]);
+                }
+                header('Content-Type: application/octet-stream');
+                header('Content-Disposition: attachment; filename="codex-backup-' . date('Ymd-His') . '.sqlite"');
+                header('Content-Length: ' . filesize($tmpPath));
+                readfile($tmpPath);
+                exit;
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'login-attempts':
+            // Self-service unlock — without this, an admin locked out by the
+            // same brute-force protection everyone else gets (5 failed
+            // attempts, 15 minutes) has no way back in except editing the
+            // database directly.
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                respond(200, Auth::loginAttempts());
+            }
+            if ($method === 'DELETE') {
+                $ip = (string) ($_GET['ip'] ?? '');
+                if ($ip === '') {
+                    respond(400, ['error' => 'IP requise']);
+                }
+                Auth::clearLoginAttemptsFor($ip);
+                respond(200, ['cleared' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'system-status':
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $pdo = Database::connection();
+                $dbPath = realpath(__DIR__ . '/../../data/codex.sqlite');
+                respond(200, [
+                    'php_version' => PHP_VERSION,
+                    'gd_available' => Thumbnails::available(),
+                    'poppler_available' => PdfRenderer::available(),
+                    'smtp_configured' => Settings::isSmtpConfigured(),
+                    'db_size_bytes' => $dbPath ? (@filesize($dbPath) ?: 0) : 0,
+                    'item_count' => (int) $pdo->query('SELECT COUNT(*) FROM items')->fetchColumn(),
+                    'items_missing_metadata' => (int) $pdo->query('SELECT COUNT(*) FROM items WHERE metadata_checked_at IS NULL')->fetchColumn(),
+                    'items_missing_cover' => (int) $pdo->query('SELECT COUNT(*) FROM items WHERE cover_path IS NULL')->fetchColumn(),
+                    'user_count' => (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn(),
+                    'library_count' => (int) $pdo->query('SELECT COUNT(*) FROM libraries')->fetchColumn(),
+                ]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 

@@ -246,6 +246,39 @@ final class Auth
     }
 
     /**
+     * The admin console's "Tentatives de connexion" card reads this —
+     * every IP with a recorded failure, not just the ones currently
+     * locked out, so an admin can also see who's been failing without
+     * yet tripping the threshold.
+     * @return list<array{ip: string, count: int, last_at: string, locked: bool, seconds_remaining: int}>
+     */
+    public static function loginAttempts(): array
+    {
+        $rows = Database::connection()->query('SELECT ip, count, last_at FROM login_attempts ORDER BY last_at DESC')->fetchAll();
+        $now = time();
+        $result = [];
+        foreach ($rows as $row) {
+            $lastAt = strtotime($row['last_at']) ?: 0;
+            $locked = (int) $row['count'] >= self::MAX_ATTEMPTS && ($now - $lastAt) < self::LOCKOUT_SECONDS;
+            $result[] = [
+                'ip' => $row['ip'],
+                'count' => (int) $row['count'],
+                'last_at' => $row['last_at'],
+                'locked' => $locked,
+                'seconds_remaining' => $locked ? max(0, self::LOCKOUT_SECONDS - ($now - $lastAt)) : 0,
+            ];
+        }
+        return $result;
+    }
+
+    /** Lets an admin unlock an IP (including their own, if they're the one locked out) without touching the database by hand. */
+    public static function clearLoginAttemptsFor(string $ip): void
+    {
+        $stmt = Database::connection()->prepare('DELETE FROM login_attempts WHERE ip = ?');
+        $stmt->execute([$ip]);
+    }
+
+    /**
      * Attempt login with username + password + 6-digit TOTP code.
      * Returns true on success, false on failure (any reason).
      */

@@ -12,6 +12,12 @@
 .admin-panel[hidden] { display: none; }
 .admin-card { background: var(--color-surface); border-radius: var(--radius-lg); padding: 22px 24px; box-shadow: var(--shadow-sm); }
 .admin-card h2 { font-size: 17px; margin-bottom: 14px; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.admin-table td { padding: 7px 4px; border-bottom: 1px solid var(--color-divider); }
+.admin-table td:first-child { color: color-mix(in srgb, var(--color-text) 60%, transparent); width: 45%; }
+.admin-table tr:last-child td { border-bottom: none; }
+.admin-row-compact { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-divider); font-size: 13.5px; }
+.admin-row-compact:last-child { border-bottom: none; }
 .admin-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .admin-card-head h2 { margin-bottom: 0; }
 .sync-result { width: 100%; margin-top: 8px; }

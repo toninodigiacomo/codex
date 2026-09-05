@@ -29,6 +29,13 @@ final class PdfRenderer
 {
     private const DPI = 130; // comfortable reading resolution without producing huge files
 
+    /** Whether poppler-utils is actually on PATH — the admin console's system status card, and the startup script's own WARN if the apt install failed, both need this without duplicating the check. */
+    public static function available(): bool
+    {
+        $path = trim((string) shell_exec('which pdftoppm 2>/dev/null'));
+        return $path !== '';
+    }
+
     public static function pageCount(string $absolutePath): int
     {
         $result = self::run(['pdfinfo', $absolutePath]);
