@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/AppLog.php';
+AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Users.php';
 require_once __DIR__ . '/../src/Totp.php';

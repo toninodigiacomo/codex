@@ -1,0 +1,58 @@
+# +---------------------------------------------------------------------------------------------------------------
+# +---------------------------------------------------------------------------------------------------------------
+# docker compose -f docker-compose.yml up -d
+services:
+  # +-------------------------------------------------------------------------------------------------------------
+  # | Codex
+  # +--------------------------------
+  # | Port: 8217
+  # +-------------------------------------------------------------------------------------------------------------
+  codex:
+    image: php:8.2-apache
+    container_name: 8217-codex
+    ports:
+      - "8217:80"                         # Configuration du port à utiliser pour le RP.
+    volumes:
+      - /mnt/nvme0n1/docker/codex/public:/var/www/html/public:ro
+      - /mnt/nvme0n1/docker/codex/public/assets:/var/www/html/public/assets
+      - /mnt/nvme0n1/docker/codex/src:/var/www/html/src:ro
+      - /mnt/nvme0n1/docker/codex/data:/var/www/html/data
+      - /mnt/nvme0n1/docker/codex/libraries:/var/www/html/libraries:ro
+
+      # External library sources: mount each one directly as a named
+      # subfolder of libraries/, rather than a symlink inside ./libraries
+      # pointing at a host path — a symlink like that is invisible from
+      # inside the container, since only ./libraries itself is mounted.
+      # Add one line per external source, matching the folder name you
+      # want it to appear as under libraries/ in the admin's path picker:
+      - /mnt/nvme0n1/docker/ubooquity/comics:/var/www/html/libraries/comics:ro
+      - /mnt/nvme0n1/docker/ubooquity/books:/var/www/html/libraries/books:ro
+
+      - /mnt/nvme0n1/docker/codex/docker/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
+      - /mnt/nvme0n1/docker/codex/docker/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+    command: >
+      bash -c "
+        mkdir -p /var/www/html/data/logs;
+        chown -R www-data:www-data /var/www/html/data /var/www/html/public/assets || true;
+        chmod -R a+rwX /var/www/html/data /var/www/html/public/assets || true;
+        php -m | grep -qi pdo_sqlite || docker-php-ext-install pdo_sqlite || echo 'WARN: pdo_sqlite install failed, continuing anyway';
+        php -m | grep -qi simplexml || docker-php-ext-install simplexml || echo 'WARN: simplexml install failed, continuing anyway';
+        which pdftoppm >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends poppler-utils) || echo 'WARN: poppler-utils install failed, PDF pages will not render';
+        php -m | grep -qiw gd || (apt-get update && apt-get install -y --no-install-recommends libpng-dev libjpeg-dev libwebp-dev && docker-php-ext-configure gd --with-jpeg --with-webp && docker-php-ext-install gd) || echo 'WARN: gd install failed, covers will be served at full resolution instead of as thumbnails';
+        a2enmod rewrite headers || true;
+        exec apache2-foreground
+      "
+    networks:
+      docker_net:
+        ipv4_address: 172.18.0.217
+        aliases:
+          - 217-codex
+    restart: unless-stopped
+
+# +---------------------------------------------------------------------------------------------------------------
+# +---------------------------------------------------------------------------------------------------------------
+networks:
+  docker_net:
+    driver: bridge
+    external: true
+    name: root_default

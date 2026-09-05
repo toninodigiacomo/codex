@@ -316,6 +316,15 @@
     params.set('limit', String(gridPageSize));
     params.set('offset', String((state.page - 1) * gridPageSize));
 
+    // Cleared immediately, before the fetch even starts — otherwise the
+    // previous view's covers stay on screen for the length of the request
+    // and visibly swap out once it resolves, which reads as a glitch more
+    // than a loading state.
+    grid.innerHTML = '';
+    resultCount.textContent = 'Chargement...';
+    emptyState.hidden = true;
+    pagination.hidden = true;
+
     try {
       const data = await fetchJson(`/api/items?${params.toString()}`);
       lastBrowseItems = data.items;
@@ -494,6 +503,12 @@
     state.groupPath = path;
     state.groupItemsPage = itemsPage || 1;
 
+    // Cleared immediately, before either fetch starts — otherwise the
+    // previous éditeur/collection's tiles stay on screen for the length of
+    // the request and visibly swap out once it resolves, which reads as a
+    // glitch more than a loading state (same fix as loadItems').
+    showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
+
     const pathQuery = encodeURIComponent(JSON.stringify(path));
     const baseParams = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}&path=${pathQuery}`;
 
@@ -503,7 +518,6 @@
         openFilteredBrowse(type, libraryId, path);
         return;
       }
-      showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
       const itemsOffset = (state.groupItemsPage - 1) * gridPageSize;
       const standalone = await fetchJson(`/api/items?${baseParams}&exact=1&limit=${gridPageSize}&offset=${itemsOffset}`);
       groupGrid.innerHTML = subfolders.map((g) => groupTileHtml(g)).join('') + standalone.items.map(itemCardHtml).join('');
@@ -516,7 +530,6 @@
         openPathLevel(type, libraryId, libraryName, path, skippedLibraryLevel, next);
       });
     } catch (err) {
-      showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
       groupEmptyState.hidden = false;
       groupEmptyState.textContent = `Erreur : ${err.message}`;
       groupPagination.hidden = true;

@@ -19,12 +19,15 @@ require_once __DIR__ . '/../../src/LibraryScanner.php';
 require_once __DIR__ . '/../../src/ItemEnrichment.php';
 require_once __DIR__ . '/../../src/ItemPages.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
+require_once __DIR__ . '/../../src/AppLog.php';
+require_once __DIR__ . '/../../src/LibraryJobs.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 // Sync and the metadata/cover backfill can process a meaningful batch of
 // files per request — PHP's usual few-second default isn't enough for that.
 ini_set('max_execution_time', '300');
+AppLog::bootstrap();
 
 // Codex is a private personal library, not a public site with an admin
 // section bolted on — every API call (reads included) requires a logged-in
@@ -54,6 +57,7 @@ if (!$hasValidSyncToken) {
 
 function respond(int $code, $data): void
 {
+    AppLog::logRequest($_SERVER['REQUEST_METHOD'] ?? '?', $_SERVER['REQUEST_URI'] ?? '?', $code);
     http_response_code($code);
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
@@ -111,6 +115,28 @@ function currentUserAllowedLibraries(): ?array
     return $user['library_ids'] ?? [];
 }
 
+/**
+ * Backfills file_size/file_mtime on an already-existing item — the
+ * baseline LibraryScanner::sync() compares against on later syncs to
+ * detect an edit in place (see schema.sql's comment on those columns).
+ * A newly-created item gets these set immediately at insertion instead
+ * (LibraryScanner::sync() does that directly); this is for everything
+ * that predates the columns, backfilled the same way extract-missing and
+ * regenerate-covers already backfill metadata/covers for old items.
+ */
+function updateFileStat(array $item): void
+{
+    $absPath = Paths::resolve($item['path']);
+    $size = @filesize($absPath);
+    $mtime = @filemtime($absPath);
+    if ($size !== false || $mtime !== false) {
+        Items::update((int) $item['id'], [
+            'file_size' => $size !== false ? $size : null,
+            'file_mtime' => $mtime !== false ? $mtime : null,
+        ]);
+    }
+}
+
 /** The éditeur nav's folder path travels as a JSON-encoded array of segments (e.g. ["Panini Books","Marvel"]) — a single delimited string would break on a folder name that itself contains the delimiter. Anything malformed or not a list of strings is treated as the root. */
 function decodeGroupPath(string $raw): array
 {
@@ -119,6 +145,42 @@ function decodeGroupPath(string $raw): array
         return [];
     }
     return array_values(array_map('strval', $decoded));
+}
+
+/**
+ * Returns up to $lines of the end of $path, read backwards in fixed-size
+ * chunks rather than loading the whole file — cheap regardless of how
+ * large the log has grown. Returns an empty array (not an error) if the
+ * file doesn't exist yet or isn't readable, since a fresh container with
+ * no errors logged yet is the common case, not a failure.
+ * @return list<string>
+ */
+function tailFile(string $path, int $lines): array
+{
+    $handle = @fopen($path, 'rb');
+    if ($handle === false) {
+        return [];
+    }
+    $chunkSize = 8192;
+    $buffer = '';
+    $newlineCount = 0;
+    $pos = @filesize($path) ?: 0;
+
+    while ($pos > 0 && $newlineCount <= $lines) {
+        $readSize = min($chunkSize, $pos);
+        $pos -= $readSize;
+        fseek($handle, $pos);
+        $chunk = fread($handle, $readSize);
+        if ($chunk === false) {
+            break;
+        }
+        $buffer = $chunk . $buffer;
+        $newlineCount += substr_count($chunk, "\n");
+    }
+    fclose($handle);
+
+    $allLines = explode("\n", rtrim($buffer, "\n"));
+    return array_slice($allLines, -$lines);
 }
 
 /** Fetches an item and enforces the same library-access rule as the single-item GET route — a 404, not 403, so an out-of-scope item's existence isn't revealed. Ends the request itself on failure. */
@@ -299,7 +361,15 @@ try {
 
         case 'libraries':
             if ($method === 'GET' && $id === null) {
+                // Filtered to the current user's own access (all of them for an
+                // admin) — this same endpoint backs both the admin's Bibliothèques
+                // tab and the reader's sidebar, and the reader must never see a
+                // library it isn't allowed into, not even just its name.
+                $allowed = currentUserAllowedLibraries();
                 $libs = Libraries::all();
+                if ($allowed !== null) {
+                    $libs = array_values(array_filter($libs, fn($l) => in_array((int) $l['id'], $allowed, true)));
+                }
                 // One item_count per library, added here rather than in Libraries::all()
                 // itself — that method is also used by callers (sync, the éditeur nav)
                 // that have no use for it and would pay for the join every time.
@@ -342,7 +412,18 @@ try {
                 if (!$lib) {
                     respond(404, ['error' => 'Bibliothèque introuvable']);
                 }
-                $result = LibraryScanner::sync($lib);
+                // No limit by default (a cron job calling this via the sync token
+                // wants one full pass, not a batch to loop over) — the admin UI's
+                // own "Synchroniser" button is what actually passes one, to show
+                // progress on a library with a lot to scan.
+                $limit = isset($_GET['limit']) && $_GET['limit'] !== '' ? max(1, (int) $_GET['limit']) : null;
+                $result = LibraryScanner::sync($lib, $limit);
+                $done = $result['added'] + $result['updated'] + $result['unchanged'];
+                if ($limit === null || ($result['added'] === 0 && $result['updated'] === 0)) {
+                    LibraryJobs::finish($id, 'sync', $done, $result['total']);
+                } else {
+                    LibraryJobs::progress($id, 'sync', $done, $result['total']);
+                }
                 respond(200, $result);
             }
             if ($method === 'POST' && $id !== null && $action === 'extract-missing') {
@@ -353,17 +434,41 @@ try {
                 }
                 $limit = min(100, max(1, (int) ($_GET['limit'] ?? 25)));
                 $pdo = Database::connection();
+                // No explicit "start" call needed — a running job for this type
+                // already has a "done" count to build on; anything else (no row,
+                // a different job type, or one that already finished) means this
+                // is a fresh run, so the baseline is 0.
+                $existing = LibraryJobs::all()[$id] ?? null;
+                $baseDone = ($existing && $existing['job_type'] === 'extract-missing' && $existing['status'] === 'running') ? $existing['done'] : 0;
+
                 $stmt = $pdo->prepare('SELECT * FROM items WHERE library_id = :lib AND metadata_checked_at IS NULL LIMIT :lim');
                 $stmt->bindValue(':lib', $id, PDO::PARAM_INT);
                 $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
                 $stmt->execute();
                 $batch = $stmt->fetchAll();
-                foreach ($batch as $item) {
+
+                $remainingBeforeStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ? AND metadata_checked_at IS NULL');
+                $remainingBeforeStmt->execute([$id]);
+                $totalEstimate = $baseDone + (int) $remainingBeforeStmt->fetchColumn();
+
+                foreach ($batch as $index => $item) {
+                    LibraryJobs::working($id, 'extract-missing', $baseDone + $index, $totalEstimate, $item['title'] ?: basename((string) $item['path']));
+                    AppLog::note("extract-missing: item {$item['id']} ({$item['path']}) en cours");
                     ItemEnrichment::run($item);
+                    updateFileStat($item);
+                    AppLog::note("extract-missing: item {$item['id']} ok");
                 }
                 $remainingStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ? AND metadata_checked_at IS NULL');
                 $remainingStmt->execute([$id]);
-                respond(200, ['processed' => count($batch), 'remaining' => (int) $remainingStmt->fetchColumn()]);
+                $remaining = (int) $remainingStmt->fetchColumn();
+                $done = $baseDone + count($batch);
+                $total = $done + $remaining;
+                if (count($batch) === 0 || $remaining === 0) {
+                    LibraryJobs::finish($id, 'extract-missing', $done, $total);
+                } else {
+                    LibraryJobs::progress($id, 'extract-missing', $done, $total);
+                }
+                respond(200, ['processed' => count($batch), 'remaining' => $remaining]);
             }
             if ($method === 'POST' && $id !== null && $action === 'regenerate-covers') {
                 // Separate from extract-missing on purpose: that one only ever
@@ -380,18 +485,29 @@ try {
                 $limit = min(100, max(1, (int) ($_GET['limit'] ?? 25)));
                 $offset = max(0, (int) ($_GET['offset'] ?? 0));
                 $pdo = Database::connection();
+                $totalStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ?');
+                $totalStmt->execute([$id]);
+                $total = (int) $totalStmt->fetchColumn();
                 $stmt = $pdo->prepare('SELECT * FROM items WHERE library_id = :lib ORDER BY id LIMIT :lim OFFSET :off');
                 $stmt->bindValue(':lib', $id, PDO::PARAM_INT);
                 $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
                 $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
                 $stmt->execute();
                 $batch = $stmt->fetchAll();
-                foreach ($batch as $item) {
+                foreach ($batch as $index => $item) {
+                    LibraryJobs::working($id, 'regenerate-covers', $offset + $index, $total, $item['title'] ?: basename((string) $item['path']));
+                    AppLog::note("regenerate-covers: item {$item['id']} ({$item['path']}) en cours");
                     ItemEnrichment::extractAndSaveCover($item);
+                    updateFileStat($item);
+                    AppLog::note("regenerate-covers: item {$item['id']} ok");
                 }
-                $totalStmt = $pdo->prepare('SELECT COUNT(*) FROM items WHERE library_id = ?');
-                $totalStmt->execute([$id]);
-                respond(200, ['processed' => count($batch), 'offset' => $offset + count($batch), 'total' => (int) $totalStmt->fetchColumn()]);
+                $done = $offset + count($batch);
+                if ($done >= $total || count($batch) === 0) {
+                    LibraryJobs::finish($id, 'regenerate-covers', $done, $total);
+                } else {
+                    LibraryJobs::progress($id, 'regenerate-covers', $done, $total);
+                }
+                respond(200, ['processed' => count($batch), 'offset' => $done, 'total' => $total]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -500,9 +616,79 @@ try {
             if ($method === 'POST') {
                 $results = [];
                 foreach (Libraries::all() as $lib) {
-                    $results[] = ['library' => $lib['name'], 'id' => $lib['id']] + LibraryScanner::sync($lib);
+                    try {
+                        $result = LibraryScanner::sync($lib);
+                        LibraryJobs::finish($lib['id'], 'sync', $result['added'] + $result['updated'] + $result['unchanged'], $result['total']);
+                        $results[] = ['library' => $lib['name'], 'id' => $lib['id']] + $result;
+                    } catch (Throwable $e) {
+                        // One library failing outright (not just a per-file conflict,
+                        // which LibraryScanner::sync already absorbs — something worse,
+                        // an unreadable mount, a corrupt row) must not stop every
+                        // library after it in the list from being synced too.
+                        LibraryJobs::fail($lib['id'], 'sync', 0, null, $e->getMessage());
+                        $results[] = ['library' => $lib['name'], 'id' => $lib['id'], 'error' => $e->getMessage()];
+                    }
                 }
                 respond(200, ['libraries' => $results]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'logs':
+            // Read-only tail of this app's own PHP-level logs (src/AppLog.php)
+            // — deliberately not Apache's native ErrorLog/CustomLog. In the
+            // base php:apache image those are symlinked to /dev/stdout/stderr
+            // (so `docker logs` captures them), which a plain fopen() can't
+            // read back; redirecting Apache's own config to log into data/
+            // instead caused a server-wide 500 that was never root-caused and
+            // had to be reverted. Logging from PHP's own error_log mechanism
+            // sidesteps all of that — it still catches every error level,
+            // including a raw fatal like memory exhaustion (PHP's engine
+            // writes that to error_log itself before terminating, independent
+            // of any try/catch), and never touches httpd's config at all.
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $which = ($_GET['log'] ?? 'error') === 'access' ? 'access' : 'error';
+                $path = $which === 'access' ? AppLog::accessLogPath() : AppLog::errorLogPath();
+                $lines = min(1000, max(10, (int) ($_GET['lines'] ?? 200)));
+                if (!is_file($path)) {
+                    respond(200, ['path' => $path, 'lines' => [], 'note' => "Fichier introuvable — rien n'a encore été écrit à cet emplacement."]);
+                }
+                if (!is_readable($path)) {
+                    respond(200, ['path' => $path, 'lines' => [], 'note' => "Le fichier existe mais n'est pas lisible par le processus PHP (permissions)."]);
+                }
+                respond(200, ['path' => $path, 'lines' => tailFile($path, $lines)]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'library-jobs':
+            // The persistent "where are we" behind each library's status line —
+            // see schema.sql's library_jobs table. Read on every load of the
+            // Bibliothèques tab, not just while a batch loop is actively running,
+            // so returning to the page (or another admin logging in elsewhere)
+            // shows the last known state rather than nothing.
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                respond(200, LibraryJobs::all());
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'orphaned-items':
+            // Ghost items left behind by library deletion before Libraries::delete()
+            // explicitly cleaned them up (it used to rely on the DB's ON DELETE SET
+            // NULL, which detaches an item from its library without removing it) —
+            // items.path being unique across every library means these block any
+            // future sync that rediscovers the same file under a re-created library
+            // at the same path. Same GET-preview/POST-delete shape as cleanup-excluded.
+            Auth::requireAdminApi();
+            $matches = Database::connection()->query('SELECT id, title, path FROM items WHERE library_id IS NULL')->fetchAll();
+            if ($method === 'GET') {
+                respond(200, ['matches' => $matches]);
+            }
+            if ($method === 'POST') {
+                foreach ($matches as $row) {
+                    Items::delete((int) $row['id']);
+                }
+                respond(200, ['deleted' => count($matches), 'items' => $matches]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 

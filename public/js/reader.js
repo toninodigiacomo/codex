@@ -5,6 +5,9 @@
   const titleEl = document.getElementById('readerTitle');
   const pageIndicator = document.getElementById('readerPageIndicator');
   const imageEl = document.getElementById('readerImage');
+  const pdfWrap = document.getElementById('readerPdfWrap');
+  const pdfCanvas = document.getElementById('readerCanvas');
+  const linkLayer = document.getElementById('readerLinkLayer');
   const statusEl = document.getElementById('readerStatus');
   const prevZone = document.getElementById('prevZone');
   const nextZone = document.getElementById('nextZone');
@@ -17,6 +20,15 @@
   let currentIndex = 0;
   let saveTimer = null;
 
+  // Set once init() decides how this item is being read — pdfDoc is the
+  // PDF.js document handle, only ever non-null when isPdf is true. Kept
+  // separate from a straight `item.format === 'pdf'` check because
+  // PDF.js itself might fail to load a specific malformed file, in which
+  // case init() falls back to the server-rendered flat-image pages
+  // (ItemPages.php/PdfRenderer.php) — same as before this feature existed.
+  let isPdf = false;
+  let pdfDoc = null;
+
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
     const data = await res.json().catch(() => ({}));
@@ -28,11 +40,13 @@
     statusEl.textContent = message;
     statusEl.hidden = false;
     imageEl.style.visibility = 'hidden';
+    pdfWrap.style.visibility = 'hidden';
   }
 
   function clearStatus() {
     statusEl.hidden = true;
     imageEl.style.visibility = 'visible';
+    pdfWrap.style.visibility = 'visible';
   }
 
   function pageUrl(index) {
@@ -40,7 +54,7 @@
   }
 
   function preload(index) {
-    if (index < 0 || index >= totalPages) return;
+    if (isPdf || index < 0 || index >= totalPages) return;
     const img = new Image();
     img.src = pageUrl(index);
   }
@@ -55,14 +69,114 @@
     footerNextBtn.disabled = currentIndex === totalPages - 1;
   }
 
+  /** How much vertical space the topbar+footer chrome eats — matches reader.css's #readerImage/.reader-pdf-wrap max-height rules exactly, since the PDF canvas has to compute its own fit-to-space size in JS rather than leaning on CSS max-height the way a plain <img> can. */
+  function availableHeight() {
+    return window.innerHeight - (window.innerWidth <= 700 ? 96 : 110);
+  }
+
+  /**
+   * Renders one page to the canvas and rebuilds the link overlay on top of
+   * it. Internal links (a table of contents entry, a cross-reference) call
+   * back into this same reader's own goTo() rather than PDF.js's own
+   * multi-page scrolling viewer, which isn't what this reader uses — one
+   * page at a time, same as the comic reader.
+   */
+  async function renderPdfPage(index) {
+    const page = await pdfDoc.getPage(index + 1); // PDF.js pages are 1-based
+    const outputScale = window.devicePixelRatio || 1;
+    const unscaled = page.getViewport({ scale: 1 });
+    const maxWidth = pdfWrap.parentElement.clientWidth || window.innerWidth;
+    const maxHeight = availableHeight();
+    const scale = Math.min(maxWidth / unscaled.width, maxHeight / unscaled.height, 3); // cap at 3x native — a huge page shouldn't demand a huge canvas just because the window is huge
+    const viewport = page.getViewport({ scale });
+
+    pdfCanvas.width = Math.floor(viewport.width * outputScale);
+    pdfCanvas.height = Math.floor(viewport.height * outputScale);
+    pdfCanvas.style.width = Math.floor(viewport.width) + 'px';
+    pdfCanvas.style.height = Math.floor(viewport.height) + 'px';
+
+    const ctx = pdfCanvas.getContext('2d');
+    const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
+    await page.render({ canvasContext: ctx, viewport, transform }).promise;
+
+    await buildLinkLayer(page, viewport);
+  }
+
+  async function buildLinkLayer(page, viewport) {
+    linkLayer.innerHTML = '';
+    let annotations;
+    try {
+      annotations = await page.getAnnotations();
+    } catch (_) {
+      return; // no links this time — the rendered page itself is still fine
+    }
+    for (const ann of annotations) {
+      if (ann.subtype !== 'Link') continue;
+      const rect = viewport.convertToViewportRectangle(ann.rect);
+      const x = Math.min(rect[0], rect[2]);
+      const y = Math.min(rect[1], rect[3]);
+      const w = Math.abs(rect[2] - rect[0]);
+      const h = Math.abs(rect[3] - rect[1]);
+      const a = document.createElement('a');
+      a.style.left = x + 'px';
+      a.style.top = y + 'px';
+      a.style.width = w + 'px';
+      a.style.height = h + 'px';
+
+      if (ann.url) {
+        a.href = ann.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      } else if (ann.dest) {
+        a.href = '#';
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          goToPdfDestination(ann.dest);
+        });
+      } else if (ann.action) {
+        // a named action like "NextPage"/"PrevPage"/"FirstPage"/"LastPage" —
+        // uncommon, but cheap to support since it's the same navigation
+        // goTo() already does
+        a.href = '#';
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (ann.action === 'NextPage') next();
+          else if (ann.action === 'PrevPage') prev();
+          else if (ann.action === 'FirstPage') goTo(0);
+          else if (ann.action === 'LastPage') goTo(totalPages - 1);
+        });
+      } else {
+        continue; // nothing to navigate to (a form field, a comment, ...) — not this reader's concern
+      }
+      linkLayer.appendChild(a);
+    }
+  }
+
+  async function goToPdfDestination(dest) {
+    try {
+      const explicit = typeof dest === 'string' ? await pdfDoc.getDestination(dest) : dest;
+      if (Array.isArray(explicit) && explicit[0] !== undefined) {
+        const pageIndex = await pdfDoc.getPageIndex(explicit[0]);
+        goTo(pageIndex);
+      }
+    } catch (_) {
+      // a destination PDF.js couldn't resolve (a malformed or unusual PDF) —
+      // silently doing nothing beats a JS error breaking the rest of the reader
+    }
+  }
+
   function goTo(index, opts) {
     if (index < 0 || index >= totalPages) return;
     currentIndex = index;
     clearStatus();
-    imageEl.src = pageUrl(index);
+    if (isPdf) {
+      renderPdfPage(index).catch(() => showStatus('Cette page est indisponible.'));
+    } else {
+      imageEl.src = pageUrl(index);
+      preload(index + 1);
+      preload(index - 1);
+    }
     updateChrome();
-    preload(index + 1);
-    preload(index - 1);
     if (!(opts && opts.skipSave)) {
       scheduleSave();
     }
@@ -112,22 +226,53 @@
   });
 
   imageEl.addEventListener('error', () => {
-    if (imageEl.getAttribute('src')) {
+    if (!isPdf && imageEl.getAttribute('src')) {
       showStatus('Cette page est indisponible.');
     }
   });
 
+  // A PDF page is rendered at a fixed pixel size (unlike the comic <img>,
+  // which just leans on CSS max-width/max-height to shrink fluidly) — a
+  // window resize needs an explicit re-render to pick up the new size.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!isPdf) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      renderPdfPage(currentIndex).catch(() => {});
+    }, 200);
+  });
+
   async function init() {
     try {
-      const [item, pagesInfo, progress] = await Promise.all([
+      const [item, progress] = await Promise.all([
         fetchJson(`/api/items/${itemId}`),
-        fetchJson(`/api/items/${itemId}/pages`),
         fetchJson(`/api/items/${itemId}/progress`).catch(() => ({ position: null })),
       ]);
 
       titleEl.textContent = item.title;
       document.title = item.title + ' — Codex';
-      totalPages = pagesInfo.count;
+
+      if (item.format === 'pdf' && typeof pdfjsLib !== 'undefined') {
+        try {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.js';
+          pdfDoc = await pdfjsLib.getDocument(`/api/items/${itemId}/download`).promise;
+          totalPages = pdfDoc.numPages;
+          isPdf = true;
+          imageEl.hidden = true;
+          pdfWrap.hidden = false;
+        } catch (_) {
+          // PDF.js couldn't make sense of this particular file — fall through
+          // to the flat server-rendered pages below, same as before this
+          // feature existed. Clickable links just won't be available for it.
+          pdfDoc = null;
+          isPdf = false;
+        }
+      }
+      if (!isPdf) {
+        const pagesInfo = await fetchJson(`/api/items/${itemId}/pages`);
+        totalPages = pagesInfo.count;
+      }
 
       if (totalPages === 0) {
         showStatus("Ce fichier n'est pas lisible dans le lecteur intégré.");

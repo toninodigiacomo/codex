@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/AppLog.php';
+AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 Auth::bootSession();
 Auth::requireLogin();
@@ -31,6 +33,10 @@ $itemId = (int) ($_GET['id'] ?? 0);
     <button type="button" class="reader-nav-zone reader-nav-prev" id="prevZone" aria-label="Page précédente"></button>
     <div class="reader-image-wrap" id="readerImageWrap">
       <img id="readerImage" alt="" draggable="false" />
+      <div class="reader-pdf-wrap" id="readerPdfWrap" hidden>
+        <canvas id="readerCanvas"></canvas>
+        <div class="reader-link-layer" id="readerLinkLayer"></div>
+      </div>
       <p class="reader-status" id="readerStatus" hidden></p>
     </div>
     <button type="button" class="reader-nav-zone reader-nav-next" id="nextZone" aria-label="Page suivante"></button>
@@ -45,6 +51,14 @@ $itemId = (int) ($_GET['id'] ?? 0);
   </footer>
 </div>
 
+<!--
+  Loaded unconditionally but only ever actually used for a .pdf item —
+  reader.js checks `typeof pdfjsLib` before touching it, so this has no
+  effect on the comic/image reading path at all. Vendored locally rather
+  than pulled from a CDN (see public/vendor/pdfjs/README.md), same as
+  vendor/qrcode.js elsewhere in this app.
+-->
+<script src="<?= asset('vendor/pdfjs/pdf.min.js') ?>"></script>
 <script src="<?= asset('js/reader.js') ?>"></script>
 
 </body>

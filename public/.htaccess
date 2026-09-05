@@ -20,8 +20,13 @@ RewriteRule ^ api/index.php [L]
   RedirectMatch 404 ^/data/
 </IfModule>
 
-# Covers/thumbnails get replaced in place sometimes — always revalidate
-# rather than risk a browser showing stale art indefinitely.
+# Covers/thumbnails get replaced in place sometimes at the same filename
+# (a re-scan, "Régénérer les miniatures") — always revalidate rather than
+# risk a browser showing stale art indefinitely. This overrides the
+# vhost-level Cache-Control (docker/000-default.conf) for the same file
+# types, since .htaccess is evaluated later in the per-directory merge —
+# that's deliberate, freshness matters more here than the byte savings a
+# longer cache would give.
 <IfModule mod_headers.c>
   <FilesMatch "\.(png|jpe?g|webp|gif)$">
     Header set Cache-Control "no-cache"

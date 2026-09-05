@@ -40,6 +40,7 @@
     users: document.getElementById('panel-users'),
     libraries: document.getElementById('panel-libraries'),
     settings: document.getElementById('panel-settings'),
+    logs: document.getElementById('panel-logs'),
   };
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -47,9 +48,11 @@
       tab.classList.add('active');
       Object.entries(panels).forEach(([key, panel]) => { panel.hidden = key !== tab.dataset.tab; });
       const key = tab.dataset.tab;
+      if (key !== 'libraries') stopJobPolling();
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
       if (key === 'settings') renderSettingsTab();
+      if (key === 'logs') renderLogsTab();
     });
   });
 
@@ -358,39 +361,171 @@
     return new Intl.NumberFormat('fr-FR').format(n || 0);
   }
 
-  /** Shared with the per-row button and the "Tout" button below it. */
-  async function extractMissingForLibrary(libId, box) {
-    let totalProcessed = 0;
-    while (true) {
-      box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
-      const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=25`);
-      totalProcessed += res.processed;
-      if (res.processed === 0 || res.remaining === 0) break;
+  /** Patches a library row's header line in place (path/date/count) without re-rendering the whole list, so the sync-result box just below it isn't wiped out. */
+  async function refreshLibraryMeta(libId) {
+    try {
+      const libs = await api('GET', '/api/libraries');
+      const lib = libs.find((l) => String(l.id) === String(libId));
+      const metaEl = document.getElementById(`lib-meta-${libId}`);
+      if (lib && metaEl) {
+        metaEl.textContent = `libraries/${lib.path} — ${formatSyncDate(lib.last_synced_at)} — ${formatCount(lib.item_count)} objet${lib.item_count === 1 ? '' : 's'}`;
+      }
+    } catch (_) {
+      // best-effort — the sync result box just below already shows what happened either way
     }
-    box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
-    return totalProcessed;
   }
 
-  /** Shared with the per-row button and the "Tout" button below it. */
-  async function regenerateCoversForLibrary(libId, box) {
-    let offset = 0;
-    let total = null;
-    while (total === null || offset < total) {
-      box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
-      const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=25&offset=${offset}`);
-      total = res.total;
-      offset = res.offset;
-      if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
+  /**
+   * Shared with the per-row button and the "Tout" button below it.
+   *
+   * limit=5, not 25: a magazine PDF's cover needs a full page render
+   * (pdftoppm), 7-13s each — a batch of 25 of those can take 4+ minutes,
+   * comfortably past PHP's own max_execution_time (300s, docker/uploads.ini)
+   * but also, on a setup fronted by a reverse proxy (nginx/openresty and
+   * their ilk default to a 60s upstream read timeout), the proxy gives up
+   * and returns a 502 long before either PHP or the batch itself actually
+   * fails — the request that logged as still legitimately "en cours" in
+   * data/logs/access.log turned out to finish fine server-side, just too
+   * late for the browser to ever see the response. Smaller batches, more
+   * requests, but each one safely under any such external timeout.
+   */
+  /** $onProgress(done, total), when given, is also called on every batch — how the "Tout ..." buttons keep their own summary line live instead of a static library name that never changes until the whole library finishes. */
+  async function extractMissingForLibrary(libId, box, onProgress = null) {
+    let totalProcessed = 0;
+    jobStarted();
+    try {
+      while (true) {
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
+        if (onProgress) onProgress(totalProcessed, null);
+        const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=5`);
+        totalProcessed += res.processed;
+        if (res.processed === 0 || res.remaining === 0) break;
+      }
+      box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
+      return totalProcessed;
+    } finally {
+      jobEnded();
     }
-    box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
-    return offset;
+  }
+
+  /** Shared with the per-row button and the "Tout" button below it — see extractMissingForLibrary's note on the batch size and on $onProgress. $startOffset resumes a job the server still shows as "running" (schema.sql's library_jobs) instead of starting over at 0. */
+  async function regenerateCoversForLibrary(libId, box, startOffset = 0, onProgress = null) {
+    let offset = startOffset;
+    let total = null;
+    jobStarted();
+    try {
+      while (total === null || offset < total) {
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
+        if (onProgress) onProgress(offset, total);
+        const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=5&offset=${offset}`);
+        total = res.total;
+        offset = res.offset;
+        if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
+      }
+      box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
+      return offset;
+    } finally {
+      jobEnded();
+    }
+  }
+
+  /** Incremented/decremented around every batch loop below — drives the tab-switch guard and the beforeunload warning, so a stray click (or an actual page reload) doesn't quietly sever a loop that's mid-batch. */
+  let activeJobCount = 0;
+
+  function jobStarted() {
+    activeJobCount++;
+    updateJobGuards();
+  }
+
+  function jobEnded() {
+    activeJobCount = Math.max(0, activeJobCount - 1);
+    updateJobGuards();
+  }
+
+  function updateJobGuards() {
+    const running = activeJobCount > 0;
+    tabs.forEach((t) => { if (!t.classList.contains('active')) t.disabled = running; });
+    window.onbeforeunload = running ? () => 'Une synchronisation ou régénération est en cours — quitter la page l\u2019interrompra.' : null;
+  }
+
+  /**
+   * Polls the persisted job status (schema.sql's library_jobs) every 2s
+   * while the Bibliothèques tab is the one showing — not gated on
+   * activeJobCount, since a job might be running from a different tab or
+   * session too, and this is what actually surfaces the item currently
+   * mid-processing (working() writes it well before a whole batch finishes
+   * and the loop's own inline updates would otherwise show it).
+   */
+  let jobPollTimer = null;
+
+  function startJobPolling() {
+    if (jobPollTimer) return;
+    jobPollTimer = setInterval(async () => {
+      try {
+        const jobs = await api('GET', '/api/library-jobs');
+        Object.keys(jobs).forEach((libId) => renderJobStatus(libId, jobs[libId]));
+      } catch (_) {
+        // best-effort — the last known status just stays on screen until the next poll succeeds
+      }
+    }, 2000);
+  }
+
+  function stopJobPolling() {
+    if (jobPollTimer) {
+      clearInterval(jobPollTimer);
+      jobPollTimer = null;
+    }
+  }
+
+  /** Renders whatever the server last recorded for a library's job (schema.sql's library_jobs) into its result box — the state that survives a page reload or coming back later, since the actual loop only advances while a tab is here driving it. */
+  function renderJobStatus(libId, job) {
+    const box = document.getElementById(`sync-result-${libId}`);
+    if (!box || !job) return;
+    const typeLabels = { sync: 'Synchronisation', 'extract-missing': 'Extraction des métadonnées', 'regenerate-covers': 'Régénération des miniatures' };
+    const label = typeLabels[job.job_type] || job.job_type;
+    const progress = job.total ? `${job.done} / ${job.total}` : `${job.done}`;
+    const ago = (Date.now() - new Date(job.updated_at).getTime()) / 1000;
+    if (job.status === 'error') {
+      box.innerHTML = `<div class="invite-link-box" style="border-color:var(--color-danger);">${esc(label)} — échec à ${progress} : ${esc(job.message || '')}</div>`;
+    } else if (job.status === 'done') {
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(label)} — terminé (${progress}), ${formatSyncDate(job.updated_at)}.</p>`;
+    } else if (ago < 20) {
+      // Recently touched enough that a tab somewhere is plausibly still driving
+      // it — shown as read-only progress rather than a Reprendre button, since
+      // clicking one while a live loop is also running would race it.
+      const current = job.current_item ? ` — en cours : ${esc(job.current_item)}` : '';
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(label)} en cours... ${progress}${current}</p>`;
+    } else {
+      box.innerHTML = `
+        <div class="invite-link-box">
+          ${esc(label)} en pause à ${progress} — aucune page n'a fait avancer ce lot depuis un moment.
+          <button type="button" class="btn btn-secondary btn-sm" data-resume-job="${libId}" data-resume-type="${esc(job.job_type)}" data-resume-done="${job.done}" style="margin-left:8px;">Reprendre</button>
+        </div>`;
+      box.querySelector('[data-resume-job]').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          if (job.job_type === 'regenerate-covers') {
+            await regenerateCoversForLibrary(libId, box, job.done);
+          } else if (job.job_type === 'extract-missing') {
+            await extractMissingForLibrary(libId, box);
+          } else {
+            await syncLibrary(libId, box);
+          }
+        } catch (err) {
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
   }
 
   async function renderLibrariesTab() {
     const panel = panels.libraries;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
     try {
-      const libraries = await api('GET', '/api/libraries');
+      const [libraries, jobs] = await Promise.all([api('GET', '/api/libraries'), api('GET', '/api/library-jobs')]);
       panel.innerHTML = `
         <div class="admin-card">
           <div class="admin-card-head">
@@ -403,6 +538,18 @@
           </div>
           <div class="admin-list" id="libList"></div>
           <div id="syncAllResult"></div>
+        </div>
+        <div class="admin-card">
+          <h2>Fiches orphelines</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Des fiches qui ne rattachent plus à aucune bibliothèque — laissées derrière par une bibliothèque
+            supprimée avant que ce nettoyage soit automatique. Comme <code>items.path</code> est unique sur
+            toute la base, elles peuvent bloquer une synchro qui retrouve les mêmes fichiers sous une
+            bibliothèque recréée au même chemin (« fichier(s) ignoré(s) — déjà indexé(s) sous une autre
+            bibliothèque »).
+          </p>
+          <button type="button" class="btn btn-secondary btn-sm" id="previewOrphanedItemsBtn">Rechercher les fiches orphelines</button>
+          <div id="orphanedItemsResult" style="margin-top:10px;"></div>
         </div>
         <div class="admin-card">
           <h2>Ajouter une bibliothèque</h2>
@@ -431,7 +578,8 @@
           </form>
         </div>
       `;
-      renderLibList(libraries);
+      renderLibList(libraries, jobs);
+      startJobPolling();
 
       document.getElementById('libBrowseBtn').addEventListener('click', () => {
         openFolderPicker(document.getElementById('libPath').value.trim(), (chosen) => {
@@ -439,19 +587,33 @@
         });
       });
 
-      document.getElementById('syncAllBtn').addEventListener('click', async () => {
+      document.getElementById('syncAllBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
         const box = document.getElementById('syncAllResult');
-        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
+        btn.disabled = true;
+        let grandTotal = 0;
+        const failures = [];
         try {
-          const res = await api('POST', '/api/sync-all');
-          box.innerHTML = res.libraries
-            .map((r) => `<div class="invite-link-box"><strong>${esc(r.library)}</strong> — ${r.added} ajouté(s), ${r.unchanged} inchangé(s), ${r.orphaned.length} orphelin(s)</div>`)
-            .join('');
-          showToast('Synchronisation terminée.');
-          renderLibrariesTab();
+          for (const lib of libraries) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}...</p>`;
+            const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
+            try {
+              grandTotal += await syncLibrary(lib.id, libBox, (done, total) => {
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}... ${done}${total ? ` / ${total}` : ''}</p>`;
+              });
+            } catch (err) {
+              // Same as extractAllBtn/regenerateAllBtn — one library's failure
+              // shouldn't stop the rest of the list from being attempted.
+              failures.push(`${lib.name} (${err.message})`);
+            }
+          }
+          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) ajoutée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
+          showToast(failures.length ? 'Synchronisation terminée avec des échecs — voir le détail.' : 'Synchronisation terminée.');
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
         }
       });
 
@@ -460,14 +622,23 @@
         const box = document.getElementById('syncAllResult');
         btn.disabled = true;
         let grandTotal = 0;
+        const failures = [];
         try {
           for (const lib of libraries) {
             box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours — ${esc(lib.name)}...</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
-            grandTotal += await extractMissingForLibrary(lib.id, libBox);
+            try {
+              grandTotal += await extractMissingForLibrary(lib.id, libBox, (done) => {
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours — ${esc(lib.name)}... ${done} traité(s)</p>`;
+              });
+            } catch (err) {
+              // One library failing (a crashed batch, a transient error) must not
+              // stop every library after it in the list from being processed too.
+              failures.push(`${lib.name} (${err.message})`);
+            }
           }
-          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) traitée(s) au total. Terminé.</div>`;
-          showToast('Extraction terminée pour toutes les bibliothèques.');
+          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) traitée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
+          showToast(failures.length ? 'Extraction terminée avec des échecs — voir le détail.' : 'Extraction terminée pour toutes les bibliothèques.');
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -482,14 +653,23 @@
         const box = document.getElementById('syncAllResult');
         btn.disabled = true;
         let grandTotal = 0;
+        const failures = [];
         try {
           for (const lib of libraries) {
             box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours — ${esc(lib.name)}...</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
-            grandTotal += await regenerateCoversForLibrary(lib.id, libBox);
+            try {
+              grandTotal += await regenerateCoversForLibrary(lib.id, libBox, 0, (done, total) => {
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours — ${esc(lib.name)}... ${done}${total ? ` / ${total}` : ''}</p>`;
+              });
+            } catch (err) {
+              // Same as extractAllBtn above — one library's failure shouldn't stop
+              // the rest of the list from being attempted.
+              failures.push(`${lib.name} (${err.message})`);
+            }
           }
-          box.innerHTML = `<div class="invite-link-box">${grandTotal} couverture(s) régénérée(s) au total. Terminé.</div>`;
-          showToast('Régénération terminée pour toutes les bibliothèques.');
+          box.innerHTML = `<div class="invite-link-box">${grandTotal} couverture(s) régénérée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
+          showToast(failures.length ? 'Régénération terminée avec des échecs — voir le détail.' : 'Régénération terminée pour toutes les bibliothèques.');
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -512,12 +692,44 @@
           showToast(err.message, true);
         }
       });
+
+      document.getElementById('previewOrphanedItemsBtn').addEventListener('click', async () => {
+        const box = document.getElementById('orphanedItemsResult');
+        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Recherche...</p>';
+        try {
+          const res = await api('GET', '/api/orphaned-items');
+          if (!res.matches.length) {
+            box.innerHTML = '<p class="text-muted" style="font-size:13px;">Aucune fiche orpheline.</p>';
+            return;
+          }
+          box.innerHTML = `
+            <p style="font-size:13px;">${res.matches.length} fiche(s) orpheline(s) :</p>
+            <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
+              ${res.matches.map((m) => `<li>${esc(m.title)} <span class="text-muted">(${esc(m.path)})</span></li>`).join('')}
+            </ul>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmOrphanedItemsBtn">Supprimer ces ${res.matches.length} fiche(s)</button>
+          `;
+          document.getElementById('confirmOrphanedItemsBtn').addEventListener('click', async () => {
+            if (!confirm(`Supprimer définitivement ces ${res.matches.length} fiche(s) orpheline(s) ?`)) return;
+            try {
+              const delRes = await api('POST', '/api/orphaned-items');
+              box.innerHTML = `<div class="invite-link-box">${delRes.deleted} fiche(s) supprimée(s).</div>`;
+              showToast('Nettoyage effectué.');
+            } catch (err) {
+              showToast(err.message, true);
+            }
+          });
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        }
+      });
     } catch (err) {
       panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
     }
   }
 
-  function renderLibList(libraries) {
+  function renderLibList(libraries, jobs) {
     const list = document.getElementById('libList');
     if (!libraries.length) {
       list.innerHTML = '<p class="text-muted">Aucune bibliothèque.</p>';
@@ -529,7 +741,7 @@
       <div class="admin-row" id="lib-row-${l.id}">
         <div class="admin-row-main">
           <strong>${esc(l.name)}</strong>
-          <span>libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)} — ${formatCount(l.item_count)} objet${l.item_count === 1 ? '' : 's'}</span>
+          <span id="lib-meta-${l.id}">libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)} — ${formatCount(l.item_count)} objet${l.item_count === 1 ? '' : 's'}</span>
         </div>
         <div class="admin-row-badges">
           <span class="badge badge-reader">${TYPE_LABELS[l.type] || l.type}</span>
@@ -550,16 +762,60 @@
       )
       .join('');
 
-    list.querySelectorAll('[data-sync-lib]').forEach((btn) => {
+    libraries.forEach((l) => renderJobStatus(l.id, jobs[l.id]));
+
+  /**
+   * Shared with the per-row button and syncAllBtn below it. Batched (5 new
+   * files per call — see extractMissingForLibrary's note on why not more,
+   * the same per-file cover-extraction cost applies to a newly-found file
+   * during sync too) for the same two reasons as the other two "Tout ..."
+   * helpers: live progress, and staying safely under a reverse proxy's own
+   * upstream read timeout regardless of how slow any one file is to
+   * process. sync-all and the cron sync token still call
+   * LibraryScanner::sync() unbatched server-side — fine for a cron job
+   * with no browser/proxy round-trip waiting on it, but that's exactly
+   * what syncAllBtn used to do too, and why it doesn't anymore.
+   */
+  async function syncLibrary(libId, box, onProgress = null) {
+    const lib = libraries.find((l) => String(l.id) === String(libId));
+    const metaEl = document.getElementById(`lib-meta-${libId}`);
+    let totalAdded = 0;
+    let totalUpdated = 0;
+    let allConflicted = [];
+    let lastRes = null;
+    jobStarted();
+    try {
+      while (true) {
+        const res = await api('POST', `/api/libraries/${libId}/sync?limit=5`);
+        totalAdded += res.added;
+        totalUpdated += res.updated || 0;
+        allConflicted = allConflicted.concat(res.conflicted || []);
+        lastRes = res;
+        const done = res.added + (res.updated || 0) + res.unchanged;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours... ${done}/${res.total}</p>`;
+        if (onProgress) onProgress(done, res.total);
+        if (lib && metaEl) {
+          metaEl.textContent = `libraries/${lib.path} — synchronisation en cours — ${done}/${res.total} objets`;
+        }
+        if (res.added === 0 && (res.updated || 0) === 0) break;
+      }
+      renderSyncResult(box, { ...lastRes, added: totalAdded, updated: totalUpdated, conflicted: allConflicted });
+      refreshLibraryMeta(libId);
+      return totalAdded + totalUpdated;
+    } finally {
+      jobEnded();
+    }
+  }
+
+  list.querySelectorAll('[data-sync-lib]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const libId = btn.dataset.syncLib;
         const box = document.getElementById(`sync-result-${libId}`);
         btn.disabled = true;
         box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
         try {
-          const res = await api('POST', `/api/libraries/${libId}/sync`);
-          renderSyncResult(box, res);
-          showToast(`Synchronisation terminée : ${res.added} ajouté(s).`);
+          const totalAdded = await syncLibrary(libId, box);
+          showToast(`Synchronisation terminée : ${totalAdded} ajouté(s).`);
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -679,11 +935,21 @@
         </div>`
       )
       .join('');
+    const conflicted = res.conflicted || [];
+    const conflictRows = conflicted.map((p) => `<div class="orphan-row"><span>${esc(p)}</span></div>`).join('');
     box.innerHTML = `
       <div class="invite-link-box">
-        ${res.added} ajouté(s), ${res.unchanged} inchangé(s)${res.orphaned.length ? `, ${res.orphaned.length} fichier(s) introuvable(s) :` : '.'}
+        ${res.added} ajouté(s), ${res.updated || 0} modifié(s) sur le disque, ${res.unchanged} inchangé(s)${res.orphaned.length ? `, ${res.orphaned.length} fichier(s) introuvable(s) :` : '.'}
         ${orphanRows}
-      </div>`;
+      </div>
+      ${
+        conflicted.length
+          ? `<div class="invite-link-box" style="border-color:var(--color-danger);">
+              ${conflicted.length} fichier(s) ignoré(s) — déjà indexé(s) sous une autre bibliothèque (chemin en doublon) :
+              ${conflictRows}
+            </div>`
+          : ''
+      }`;
     box.querySelectorAll('[data-delete-orphan]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         try {
@@ -788,7 +1054,7 @@
             <input id="thumbnailWidthSlider" type="range" min="50" max="300" step="5" value="${esc(s.thumbnail_width)}" style="width:100%;max-width:320px;" />
           </div>
           <div>
-            <button type="button" class="btn btn-secondary" id="saveThumbnailSizeBtn" style="margin-top:var(--space-3);">Enregistrer</button>
+            <button type="button" class="btn btn-primary" id="saveThumbnailSizeBtn" style="margin-top:var(--space-3);">Enregistrer</button>
           </div>
         </div>
         <div class="admin-card">
@@ -804,10 +1070,10 @@
             </div>
             <div class="field" style="flex:0 0 auto;">
               <label for="gridPageSize">Objets max par page</label>
-              <input class="input" id="gridPageSize" type="number" min="1" max="300" value="${esc(s.grid_page_size)}" style="width:120px;" />
+              <input class="input" id="gridPageSize" type="number" min="1" max="300" value="${esc(s.grid_page_size)}" style="width:100px;" />
             </div>
             <div style="margin-left:auto;">
-              <button type="button" class="btn btn-secondary" id="saveGridDensityBtn">Enregistrer</button>
+              <button type="button" class="btn btn-primary" id="saveGridDensityBtn">Enregistrer</button>
             </div>
           </div>
         </div>
@@ -833,7 +1099,7 @@
               <input class="input" id="homeShelfRows" type="number" min="1" max="5" value="${esc(s.home_shelf_rows)}" style="width:100px;" />
             </div>
             <div style="margin-left:auto;">
-              <button type="button" class="btn btn-secondary" id="saveHomeShelfBtn">Enregistrer</button>
+              <button type="button" class="btn btn-primary" id="saveHomeShelfBtn">Enregistrer</button>
             </div>
           </div>
         </div>
@@ -1097,6 +1363,53 @@
     } catch (err) {
       panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
     }
+  }
+
+  // ============================================================
+  // Logs
+  // ============================================================
+  async function renderLogsTab() {
+    const panel = panels.logs;
+    panel.innerHTML = `
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <h2>Journaux</h2>
+          <div class="admin-row-actions-group">
+            <select class="input" id="logSelect" style="width:auto;">
+              <option value="error">Erreurs (error.log)</option>
+              <option value="access">Accès (access.log)</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" id="logRefreshBtn">Rafraîchir</button>
+          </div>
+        </div>
+        <p class="text-muted" id="logPath" style="font-size:12.5px;margin-top:-8px;"></p>
+        <pre id="logContent" style="background:var(--color-bg);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:12px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
+      </div>`;
+
+    const select = document.getElementById('logSelect');
+    const pathEl = document.getElementById('logPath');
+    const contentEl = document.getElementById('logContent');
+
+    async function loadLogs() {
+      contentEl.textContent = 'Chargement...';
+      try {
+        const res = await api('GET', `/api/logs?log=${select.value}&lines=300`);
+        pathEl.textContent = res.path;
+        if (res.note) {
+          contentEl.textContent = res.note;
+        } else {
+          contentEl.textContent = res.lines.length ? res.lines.join('\n') : '(vide — aucune entrée)';
+          contentEl.scrollTop = contentEl.scrollHeight; // most recent entries are at the bottom, like a real tail
+        }
+      } catch (err) {
+        contentEl.textContent = '';
+        showToast(err.message, true);
+      }
+    }
+
+    select.addEventListener('change', loadLogs);
+    document.getElementById('logRefreshBtn').addEventListener('click', loadLogs);
+    loadLogs();
   }
 
   renderUsersTab();

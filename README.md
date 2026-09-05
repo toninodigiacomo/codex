@@ -4,10 +4,13 @@ A personal ebook/comic library server (Ubooquity-style) — same hosting
 approach as [My Lost Treasure]: `php:8.2-apache` via `compose.yml`, no
 custom Docker image.
 
-**Status: early scaffold.** Sign-in is a static page (visual direction
-only, no auth wired up yet). Database layer, REST API, and the library
-browsing screen are built and tested. Still to come: the reader, the
-server admin panel, the mobile layout, and real authentication.
+**Status: functional daily-use app.** Auth (TOTP-based MFA, invites,
+three-tier roles), library sync/scan, an admin console (users,
+libraries, réglages, journaux), the reader (embedded viewer, reading
+progress), and an éditeur/collection browsing nav are all built and in
+use against a real multi-thousand-item collection. Still rough around
+the edges in a few places — see the "Known gap" notes scattered
+through this file.
 
 ## Design
 
@@ -172,20 +175,48 @@ as "the cover" depends on type (`src/CoverExtractor.php`):
   nothing is declared.
 - **other** (a standalone image file) — the file itself.
 
-Extracting from `.epub`/`.cbz` reuses `MiniZip.php`. The image is saved
-**at its original resolution and format, unmodified** — `src/Thumbnails.php`
-just writes the bytes to disk, no GD, no resizing. Resizing was tried
-first, but GD isn't bundled by default in `php:8.2-apache` either, and
-unlike `MiniZip.php` (where the ZIP format was simple enough to
-reimplement), there's no equivalent shortcut for image decoding — getting
-GD working means compiling it against zlib/libpng/libjpeg dev headers the
-base image doesn't have, which needs network access and a compiler *every
-time the container is recreated* (the compiled extension lives in the
-writable layer, which `docker compose down && up` wipes — a plain
-`restart` is fine). That's a real reliability cost — a broken package
-mirror on some future reboot silently breaking cover art — for a "nice to
-have" that's just page-load bandwidth. Serving full-resolution scans
-costs a bit more bandwidth per grid tile; that's the trade being made.
+Extracting from `.epub`/`.cbz` reuses `MiniZip.php`. `src/Thumbnails.php`
+resizes the saved image down to a "contain" fit within a configured
+box (Réglages → Miniatures, a slider — width in px, 50–300, default
+165; height always follows at a fixed 25:36 ratio, so there's only one
+number to set, not two that could drift out of sync), via **GD** —
+installed at container startup (`compose.yml`, same
+`docker-php-ext-install` pattern already used there for `pdo_sqlite`/
+`simplexml`, rather than baked into a custom image) instead of served
+at original resolution. This is a reversal of an earlier decision
+(resizing skipped entirely, GD considered too much reliability risk for
+a "nice to have") — revisited once the same trade-off was already being
+accepted for the other extensions installed the same way, and it turned
+out to matter a lot once the collection grew into the thousands: a grid
+of 80 full-resolution scans was visibly slow to load, and a resized
+JPEG (quality 82) is a fraction of the size.
+
+**Degrades gracefully at every step, never a broken cover.** GD missing
+entirely, a corrupt/undecodable image, or a genuinely oversized source
+(a `getimagesize()` check — cheap, header-only — skips anything over
+~60 megapixels *before* attempting a full decode, since that's what
+actually costs memory: GD's internal buffer is roughly width × height ×
+4 bytes, and a real memory-exhaustion fatal in PHP can't be caught by
+any `try`/`catch`, so this has to be avoided rather than recovered
+from) — any of these just falls back to saving the original bytes
+unresized, exactly like the old behavior. `docker/uploads.ini` sets
+`memory_limit = 512M` (up from PHP's default 256M) for exactly this —
+some scanned covers are large enough to need the headroom even with
+the size guard in place.
+
+Extraction/resizing only happens automatically for **newly discovered**
+files (tied to sync, see below) — a library indexed before GD was
+active still has its covers at full resolution until told otherwise.
+The admin console's Bibliothèques tab has a **"Régénérer les
+miniatures"** button per library (and a **"Tout régénérer
+(miniatures)"** for every library at once) that re-extracts every
+item's cover regardless of whether it already has one, batched (25 at
+a time) so the admin sees live progress rather than one long silent
+request. `folder.jpg`-style thumbnails (the éditeur nav's tile grids,
+below) go through the same resize on the fly, cached to disk
+(`public/assets/folder-thumbs/`, keyed on the source file's own mtime
+plus the configured size, so both a replaced `folder.jpg` and a changed
+size setting invalidate the cache on their own).
 
 **`.pdf` files (regardless of whether they're catalogued as a magazine
 or an ebook) get real page rendering** — `src/PdfRenderer.php` shells
@@ -262,42 +293,83 @@ against the now-protected API.
 
 ## Reader home page — shelves, not a firehose
 
-`library.php` opens in **home mode**: three "shelves" (`#shelf-comic`,
-`#shelf-ebook`, `#shelf-magazine`), each the most recently added items of
-that type, capped at 4 rows. A shelf with fewer items than one full row
-hides entirely rather than showing a half-empty row — a library with
-only 2-3 magazines, say, just doesn't get a magazine shelf yet. The
-first interaction with search or the type tabs — the only two controls
-that live in the sticky top nav, reachable from either mode — switches
-to **browse mode** (the previous single-grid-with-sidebar-filters
-behavior, now also row-trimmed): `library.js`'s `state.mode` flips once
-and stays there for the rest of the session; there's no way back to home
-mode except reloading the page. Default sort, both on the shelves and
-once in browse mode, is most-recently-added first (`added_at DESC`) —
-the dropdown order is Ajouts récents / Ajouts anciens / Titre A→Z / Titre
-Z→A to match.
+`library.php` opens in **home mode**: one shelf per content type that
+actually has a library (`#shelf-comic`, `#shelf-ebook`, ...), the most
+recently added items of that type. Each shelf fetches a fixed 60 items
+but only shows a configurable window before a horizontal scroll is
+needed to see the rest (Réglages → Étagères de la page d'accueil:
+columns visible, rows visible — above 1 row, tiles fill a column at a
+time via CSS Grid's `grid-auto-flow: column`, so scrolling stays
+horizontal-only regardless — and how many are fetched in the first
+place, 40–120, default 60). A shelf with nothing in it hides entirely.
+The first interaction with search or the type tabs switches to **browse
+mode** (a single grid with sidebar filters): `library.js`'s `state.mode`
+flips once and stays there for the rest of the session. Default sort,
+both on the shelves and once in browse mode, is most-recently-added
+first (`added_at DESC`).
 
-**No incomplete last row, anywhere.** A CSS grid using
-`auto-fill`/`minmax` doesn't expose "how many columns it settled on" as
-something JS can read from the rule itself — but the browser's
-*resolved* `grid-template-columns` value does, once the grid has
-actually laid out (`getComputedStyle(gridEl).gridTemplateColumns` comes
-back as a space-separated list of track sizes; its length is the column
-count). `renderGridTrimmed()` in `library.js` renders the full item set,
-reads that back, and removes however many trailing cards fall short of
-a full row — used both for the browse grid (fetches up to 120, keeps
-whatever divides evenly by the real column count) and the home shelves
-(same idea, capped at 4 rows first). A debounced `resize` listener
-re-runs the same trim without re-fetching, since the column count
-changes with viewport width. This still isn't something a headless
-browser check could run in this environment — no Chrome available to
-install here — so the row math was unit-tested in isolation (column
-count × row cap × item count, several edge cases including "too few
-items for even one row") rather than watched render.
+**Grids are paginated, not "load everything and trim the last row."**
+An earlier approach rendered every matching item and cropped the
+trailing partial row client-side; once a library reached the
+thousands, this meant one huge, slow-to-render response per view.
+Réglages → Densité des grilles sets two independent numbers: how many
+columns wide a grid is (1–15, default 10 — a CSS `max-width` cap
+combined with `auto-fill` so it's still responsive *below* that width,
+just never wider), and the total items per page (1–300, default 80,
+so 80÷10 reads as "10×8" at the defaults without either number being
+derived from the other). Real pagination («, ‹, page/total, ›, ») —
+server-side `limit`/`offset` on `GET /api/items` — replaces the old
+client-side trim.
+
+## Browsing by publisher / collection (the éditeur nav)
+
+For a library laid out on disk as `Éditeur/Collection/Tome...` — or
+nested arbitrarily deeper (`Éditeur/Collection/Sous-collection/...`) —
+a single Réglages toggle (`show_publishers`) adds a small arrow next to
+that type's tab, opening a recursive folder-tile browser. This replaced
+an earlier design with two separate toggles (publishers-only /
+collections-only / both) and a fixed two-level hierarchy; the fixed
+depth didn't survive contact with a real collection that had a third
+level (e.g. an éditeur's sub-imprints, each with their own
+collections).
+
+`src/LibraryGroups.php::listSubfolders($type, $allowedLibraryIds,
+$libraryId, $pathPrefix)` is the one function behind every level: given
+a path prefix (empty for the éditeur listing itself), it returns the
+folder names directly under it — an éditeur, a collection, and a
+sous-collection are all just "the folders under this path," recursed by
+calling the same function again with one more segment appended.
+Nothing is stored: a library re-synced with folders renamed just
+reflects that on the next page load. A path with **no subfolders at
+all** (a leaf) skips straight to the normal paginated item grid instead
+of showing a dead-end tile screen — this applies at any depth, so an
+éditeur with no collections, or a collection with no sous-collections,
+behaves the same way. A tile grid also carries along any tomes sitting
+directly in that folder alongside its subfolders (`exact=1` on
+`GET /api/items`, matching only items whose path stops exactly at that
+depth) — a lone one-shot living next to several collection folders
+doesn't just disappear.
+
+The nav starts one level up from all this: **one tile per library of
+the chosen type** (`GET /api/library-groups`), never merged even when
+two libraries share a type — two "BD" libraries stay two separate
+tiles so their éditeurs aren't mixed together. Skipped automatically
+straight to the éditeur grid when there's only one library of that
+type. A tile's thumbnail reuses the exact convention
+`scan_exclude_pattern` already exists to filter out —
+`folder.jpg`/`header.jpg`/etc. sitting directly in that folder,
+Ubooquity-style — falling back to the cover of that folder's first item
+(naturally sorted) if there's no sidecar image.
+
+`GET /api/display-settings` exists because `GET /api/settings` is
+admin-only (it carries the SMTP password) — readers need to know
+`show_publishers` and the grid-density/thumbnail-size numbers above to
+render correctly, so that reader-safe subset gets its own route rather
+than loosening the real settings endpoint.
 
 ## Admin console
 
-`/admin.php` (admin role only — `Auth::requireAdmin()`) has three tabs:
+`/admin.php` (admin role only — `Auth::requireAdmin()`) has four tabs:
 
 - **Utilisateurs** — invite a user by username + email + role
   (admin/reader) + which libraries they can see. No password is set by the
@@ -324,12 +396,40 @@ items for even one row") rather than watched render.
   delete them — blocked from deleting/demoting the last remaining admin,
   or deleting their own account.
 - **Bibliothèques** — add/edit/delete `libraries` rows (name + path,
-  relative to the `libraries/` mount — see below).
+  relative to the `libraries/` mount — see below), each showing its own
+  item count and last-sync date, refreshed in place after any action
+  rather than needing a manual page reload. Per library: **Synchroniser**
+  (batched, 25 new files at a time, showing live "X/Y" progress rather
+  than one silent long request — see "Discovering content" below),
+  **Métadonnées manquantes** (backfill), **Régénérer les miniatures**
+  (re-extract every cover at the currently configured size, batched the
+  same way). **Tout synchroniser** / **Tout extraire (métadonnées)** /
+  **Tout régénérer (miniatures)** repeat each of those across every
+  library in turn — one library failing outright doesn't stop the rest
+  of the list from being attempted; a "Fiches orphelines" card below the
+  list finds and deletes any item left with no library at all (see
+  "Deleting a library" below).
 - **Réglages** — SMTP relay configuration (host, port, encryption,
   credentials, from-address) plus a "send a test email" button to verify
-  it before relying on it for real invites. The password field is never
-  echoed back by the API (`smtp_password_set: true/false` only) and is
-  left untouched if you save the form without retyping it.
+  it before relying on it for real invites (the password field is never
+  echoed back by the API — `smtp_password_set: true/false` only — and is
+  left untouched if you save the form without retyping it); the éditeur
+  nav toggle; thumbnail size (a slider, see "Cover images"); grid
+  density and home-shelf density (see "Reader home page" and "Browsing
+  by publisher / collection" above).
+- **Journaux** — a read-only tail of Apache's error/access logs.
+  **Known gap**: in the base `php:8.2-apache` image,
+  `${APACHE_LOG_DIR}/access.log` and `error.log` are symlinked to
+  `/dev/stdout`/`/dev/stderr` (so `docker logs` captures them) — a
+  character device, not a regular file, so this tab currently reports
+  them as not found even though Apache is actively writing through that
+  same path. An attempt to redirect logging into `data/` instead (a
+  location this app fully controls, and one that would also survive a
+  container recreation) caused a server-wide 500 and was reverted before
+  being properly root-caused — worth another look, but the working
+  hypothesis is a directory-creation ordering issue between the startup
+  script and Apache's own config-parse step, not a `.htaccess` problem
+  (that file is unrelated and wasn't touched).
 
 **Reader access is actually enforced, not just recorded**: `/api/items`
 (list, and single-item lookup by id) is filtered server-side to a
@@ -337,7 +437,10 @@ reader's assigned libraries — `src/Items.php`'s `library_ids` filter plus
 a `currentUserAllowedLibraries()` check in the API layer that admins skip
 entirely. A reader with no libraries assigned sees nothing, by design,
 rather than defaulting to "everything" — an admin has to deliberately
-grant access.
+grant access. `Items::search()` also unconditionally excludes any item
+with `library_id IS NULL` (see "Deleting a library" below) — an orphaned
+item has no library to check permissions against, so it must never
+surface just because nothing else happened to filter it out.
 
 ## Sending email — `src/Mailer.php`
 
@@ -475,56 +578,6 @@ connection, so a second request just waits its turn instead of racing,
 and re-checks the table once unblocked — correctly finding nothing left
 to do if another request already finished.
 
-## Browsing by publisher / collection
-
-For a library laid out on disk as `Éditeur/Collection/Tome...`, two
-Réglages toggles (`show_publishers`, `show_collections`, global —
-not per-library, since a reader only ever meets this through a
-type-level nav tab, already spanning every library sharing that type)
-add a small arrow next to that type's tab. What it opens depends on
-which are on — this is deliberately state-driven rather than a fixed
-hierarchy:
-
-- Only publishers on: arrow → publisher grid → click one → every item
-  under it, any depth, flattened (no collection-level stop).
-- Only collections on: arrow → every collection folder across every
-  publisher, flat, no publisher grouping → click one → its items.
-- Both on: arrow → publishers → click one → *its* collections only →
-  click one → its items.
-
-`src/LibraryGroups.php` derives all of this from `items.path` alone,
-relative to whichever library each item belongs to — the first folder
-segment is the publisher, the second (when there is one) is the
-collection. Nothing is stored: a library re-synced with folders
-renamed just reflects that on the next page load. Matching an item to
-a publisher/collection is done in PHP over each item's path segments,
-not a SQL `LIKE` pattern — a collection reached from the flat,
-publisher-less listing has no publisher to anchor a path prefix on, and
-a wildcard-anywhere pattern risked a false match if the collection's
-name happened to appear as a substring elsewhere in some unrelated
-item's path.
-
-A folder's thumbnail reuses the exact convention `scan_exclude_pattern`
-already exists to filter out — `folder.jpg`/`header.jpg`/etc. sitting
-directly in that folder, Ubooquity-style, are exactly the per-folder
-cover art to show here, discovered live off disk (not cached) when a
-publisher/collection is listed. No sidecar image → falls back to the
-cover of that folder's first item (naturally sorted). Serving that
-sidecar image needed a new endpoint, `GET /api/folder-thumbnail`,
-since library content is mounted read-only outside `public/` and can't
-be linked to directly: it re-checks the requested path actually falls
-under a library the requesting user can see (matching every other
-access check in this app) before reading the file, on top of rejecting
-`..` segments and any extension that isn't a plain image — a direct,
-crafted request is never taken purely on trust just because a client
-CAN construct arbitrary query strings.
-
-`GET /api/display-settings` exists because `GET /api/settings` is
-admin-only (it carries the SMTP password) — readers need to know
-whether these two toggles are on to decide whether to show the arrow at
-all, so that one pair of booleans gets its own small reader-reachable
-route rather than loosening the real settings endpoint.
-
 ## Three-tier user roles
 
 `users.role` is one of `admin`, `reader` (branded "Utilisateur avancé"
@@ -584,8 +637,26 @@ accordingly (checked via `GET /api/items/:id/pages` when the item page
 loads).
 
 `src/ItemPages.php` is the single place that knows how to list and fetch
-pages across every supported format — `reader.php`/`reader.js` and the
-API route below don't know or care which one a given item is.
+pages across every supported format — `reader.php`/the fallback path in
+`reader.js` and the API route below don't know or care which one a
+given item is.
+
+**A `.pdf` specifically renders through PDF.js in the browser, not
+`ItemPages.php`, whenever it can** — `reader.js` loads the raw file
+(`GET /api/items/:id/download`, same permission check as everything
+else; the `Content-Disposition: attachment` header on that route has no
+effect on a same-origin `fetch()`, only on a top-level navigation) via
+the vendored `public/vendor/pdfjs/`, draws each page to a `<canvas>`,
+and overlays real clickable `<a>` elements positioned from the page's
+own link annotations (`page.getAnnotations()` + PDF.js's
+`viewport.convertToViewportRectangle()` for the pixel math) — a table
+of contents entry or a cross-reference actually works now, calling back
+into this same reader's own `goTo()` for an internal destination rather
+than PDF.js's own multi-page scrolling viewer, which isn't the UI this
+reader uses. `ItemPages.php`/`PdfRenderer.php`'s flat per-page JPEG
+rendering is still there as the fallback for whatever PDF.js can't make
+sense of (caught around `pdfjsLib.getDocument(...).promise`) — links
+just won't be clickable for that one file, same as before this existed.
 
 **Reading progress** (`reading_progress` table — `position` as a
 1-based-in-the-UI/0-based-internally page index, `total_pages` cached so
@@ -632,6 +703,23 @@ recursively, creates an item for every recognized file (`.cbz`, `.cbr`,
 and reports — without deleting — any already-indexed item whose file has
 since disappeared. Deleting an orphaned entry is a deliberate action the
 admin takes from the sync result, not something a scan does on its own.
+
+**A file already indexed under the same path still gets re-checked, not
+just skipped.** `items.file_size`/`file_mtime` record what `stat()` said
+at the last (re-)extraction; a later sync compares those against the
+file's *current* `filesize()`/`filemtime()` — both already effectively
+free, since PHP's own stat cache means they're very likely reusing the
+same syscall result `walk()`'s own `is_file()` check just made — and if
+either differs, treats it as edited in place (a rescanned page, a
+corrected translation, anything that keeps the same filename on
+purpose) and re-runs `ItemEnrichment::run()` for it, same as a brand
+new file. Hashing every file's actual bytes on every sync would catch
+this too, but at the cost of reading the full content of every
+already-indexed file, every time — for a library living on a network
+mount, that's minutes turned into potentially hours; a size/mtime
+mismatch is the cheap 99% case, and the one edit it can't catch
+(identical byte count *and* identical mtime) essentially never happens
+by accident.
 
 **An item's type comes from its library, not its file extension.** A
 bare `.pdf` is genuinely ambiguous on its own — a scanned comic and a
@@ -692,25 +780,58 @@ current pattern, and deletes them on confirmation. Only fixes what's in
 the database — nothing on disk is touched.
 
 From the admin console's Bibliothèques tab: a **"Synchroniser"** button
-per library, and a **"Tout synchroniser"** button for all of them at
-once — both show a result (added / unchanged / orphaned, with a delete
-button per orphaned entry) right there, no need to check logs.
+per library, batched (25 new files per call, the client loops until
+nothing's left) so it shows live "X/Y" progress on a library with a lot
+to index rather than one long silent request — `LibraryScanner::sync()`
+takes an optional `$limit` for this; a `null` limit (what `sync-all` and
+the cron sync token still use) processes everything in one pass, same
+as before. No state needs tracking between batched calls: each call
+walks and diffs the whole tree fresh, but a file a previous call already
+inserted is now simply in the database and shows up as "unchanged"
+instead of being re-inserted, so the loop just keeps going until
+`added` comes back 0. A **"Tout synchroniser"** button repeats this
+across every library — one library failing outright doesn't stop the
+rest of the list from being attempted, and `items.path`'s collisions
+(see "Deleting a library" below) are absorbed per-file rather than
+aborting that library's whole sync.
 
 **Scheduling** doesn't run inside the container — no cron daemon was
 added, on the same "avoid another moving dependency" reasoning as
 everything else in this project (`MiniZip.php`, the hand-written SMTP
-client, dropping GD). Instead, `POST /api/sync-all` and
-`POST /api/libraries/:id/sync` accept a shared secret as an
-`X-Sync-Token` header, as an alternative to a logged-in session — meant
-for an external scheduler (a crontab entry on the host, wherever Codex
-already runs) that has no browser session to work with. The token lives
-in Réglages (view/regenerate it there — regenerating immediately
-invalidates the old one), along with a ready-to-copy example crontab
-line built from it and the configured site URL. This exception is
-scoped narrowly: the token only unlocks the two sync routes specifically
-(checked before the app's normal "every request needs a session" rule
-even runs) — it's never accepted anywhere else, so a leaked token can't
-be used to browse or manage anything beyond triggering a sync.
+client). Instead, `POST /api/sync-all` and `POST /api/libraries/:id/sync`
+accept a shared secret as an `X-Sync-Token` header, as an alternative to
+a logged-in session — meant for an external scheduler (a crontab entry
+on the host, wherever Codex already runs) that has no browser session to
+work with. The token lives in Réglages (view/regenerate it there —
+regenerating immediately invalidates the old one), along with a
+ready-to-copy example crontab line built from it and the configured
+site URL. This exception is scoped narrowly: the token only unlocks the
+two sync routes specifically (checked before the app's normal "every
+request needs a session" rule even runs) — it's never accepted anywhere
+else, so a leaked token can't be used to browse or manage anything
+beyond triggering a sync.
+
+## Deleting a library — items.path is unique across all of them
+
+`items.path` is `UNIQUE` **across the whole table**, not per library —
+it's stored relative to the shared `libraries/` mount, so two genuinely
+different files under two different libraries never collide in
+practice. `Libraries::delete()` used to rely purely on the schema's
+`ON DELETE SET NULL` on `items.library_id` to detach a deleted
+library's items, rather than actually deleting them — which left them
+behind as permanent ghosts (`library_id IS NULL`, excluded from every
+listing per the note in "Admin console" above, but still occupying
+their `path` value in the unique index). Re-creating a library at the
+same path and syncing it rediscovers the same files and collides with
+its own leftovers: `SQLSTATE[23000]: UNIQUE constraint failed:
+items.path`. `Libraries::delete()` now deletes the library's items
+outright first; the admin console's "Fiches orphelines" cleanup handles
+any ghosts left over from before this fix. `LibraryScanner::sync()`
+also catches a `PDOException` on this specific constraint per-file now
+(reported back as `conflicted`, shown in the sync result) rather than
+letting it escape and abort the rest of that library's sync — a genuine
+remaining path collision (two libraries whose folders actually
+overlap, say) no longer takes an entire sync down with it.
 
 ## Local hosting
 
@@ -720,14 +841,14 @@ docker compose up -d
 
 Same pattern as My Lost Treasure: `public/` read-only except
 `public/assets/` (read-write, for covers/uploads later), `data/`
-read-write, PHP upload limits raised for large scans (`docker/uploads.ini`).
-The container also checks for `pdo_sqlite` and `simplexml` at
-startup and installs whichever is missing (neither usually is — both
-are commonly bundled by default; this is just a safety net, and only
-costs time on the rare first boot where one is actually absent). `gd`
-used to be checked for too, until it turned out to need system libraries
-the base image doesn't ship — see "Cover images" below for why it was
-dropped instead of chased.
+read-write, PHP upload limits raised for large scans (`docker/uploads.ini`,
+which also sets `memory_limit = 512M` — see "Cover images"). The
+container also checks for `pdo_sqlite`, `simplexml`, `poppler-utils`
+(PDF rendering), and `gd` (thumbnail resizing) at startup and installs
+whichever is missing — GD needs its own system libraries
+(`libpng-dev`/`libjpeg-dev`/`libwebp-dev`) the base image doesn't ship,
+so it's compiled the same "check and install what's missing" way as
+the rest rather than baked into a custom image.
 **None of these checks can block Apache from starting** — each step in
 the startup command is independent (`|| true` / `|| echo 'WARN: ...'`
 rather than a single `&&`-chained pipeline), and the final step is

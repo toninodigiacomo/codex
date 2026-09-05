@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/AppLog.php';
+AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 Auth::bootSession();
 Auth::requireLogin(); // item management is administration, not browsing — admins can reach this page

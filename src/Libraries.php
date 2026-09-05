@@ -59,9 +59,17 @@ final class Libraries
         $stmt->execute($params);
     }
 
+    /**
+     * Deletes the library's items outright first, rather than leaving the
+     * foreign key's ON DELETE SET NULL detach them into orphaned rows —
+     * items.path is unique across every library, so a library later
+     * re-created at the same path would otherwise collide with its own
+     * leftover ghosts on the very next sync.
+     */
     public static function delete(int $id): void
     {
-        $stmt = Database::connection()->prepare('DELETE FROM libraries WHERE id = ?');
-        $stmt->execute([$id]);
+        $pdo = Database::connection();
+        $pdo->prepare('DELETE FROM items WHERE library_id = ?')->execute([$id]);
+        $pdo->prepare('DELETE FROM libraries WHERE id = ?')->execute([$id]);
     }
 }

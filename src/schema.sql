@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS items (
   issue_number REAL,
   synopsis     TEXT,
   metadata_checked_at TEXT,        -- when extraction was last attempted, success or not — NOT the same as "has a cover": a magazine or an unreadable file is legitimately never going to have one, and must not be retried forever
+  file_size    INTEGER,            -- filesize()/filemtime() at the last (re-)extraction — a sync compares the
+  file_mtime   INTEGER,            -- file's current stat() against these to detect an edit in place (same path,
+                                    -- different content) far more cheaply than hashing every file's bytes every
+                                    -- time, at the cost of missing the rare edit that preserves both exactly
   added_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -130,3 +134,24 @@ CREATE TABLE IF NOT EXISTS reading_progress (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reading_progress_user ON reading_progress(user_id, updated_at);
+
+-- One row per library, overwritten in place by whichever batch endpoint is
+-- currently driving it (sync / extract-missing / regenerate-covers) — the
+-- persistent "where are we" the admin console's Status area reads, since
+-- the actual batch loop lives in the browser tab that started it and stops
+-- advancing the moment that tab navigates away or reloads. Not a real
+-- background job queue — no daemon process keeps calling batches for you —
+-- just a server-side record of the last known progress, so returning to
+-- the page (or a decently-timed refresh) shows something meaningful
+-- instead of nothing, and a "Reprendre" button can pick the loop back up
+-- from the recorded offset instead of starting over from zero.
+CREATE TABLE IF NOT EXISTS library_jobs (
+  library_id INTEGER PRIMARY KEY REFERENCES libraries(id) ON DELETE CASCADE,
+  job_type   TEXT NOT NULL,        -- 'sync' | 'extract-missing' | 'regenerate-covers'
+  status     TEXT NOT NULL,        -- 'running' | 'done' | 'error'
+  done       INTEGER NOT NULL DEFAULT 0,
+  total      INTEGER,
+  current_item TEXT,               -- title of the item mid-processing right now, if any — null between items/batches
+  message    TEXT,                 -- set on status = 'error'
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);

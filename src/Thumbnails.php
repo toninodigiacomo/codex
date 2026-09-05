@@ -21,6 +21,7 @@ require_once __DIR__ . '/Settings.php';
 final class Thumbnails
 {
     private const JPEG_QUALITY = 82;
+    private const MAX_SOURCE_PIXELS = 60_000_000; // ~ a 7700×7700 image — see the note in resize() below
 
     public static function available(): bool
     {
@@ -72,6 +73,21 @@ final class Thumbnails
         if (!self::available()) {
             return null;
         }
+
+        // getimagesize() reads just the header, not the pixel data — cheap
+        // enough to check before committing to a full decode, which is what
+        // actually costs memory (roughly width × height × 4 bytes for GD's
+        // internal truecolor buffer). A genuinely huge source can exceed
+        // even a generous memory_limit and crash the whole request in a way
+        // no try/catch can recover from — a real PHP memory-exhaustion fatal
+        // isn't catchable. Skipping the resize for that one image (falling
+        // back to saving it as-is, same as GD being unavailable) is what
+        // keeps one oversized cover from taking an entire batch down.
+        $info = @getimagesizefromstring($imageData);
+        if ($info === false || $info[0] * $info[1] > self::MAX_SOURCE_PIXELS) {
+            return null;
+        }
+
         $image = @imagecreatefromstring($imageData);
         if ($image === false) {
             return null;

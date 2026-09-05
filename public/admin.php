@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/AppLog.php';
+AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 Auth::bootSession();
 Auth::requireAdmin();
@@ -31,11 +33,13 @@ $me = Auth::currentUser();
       <button class="admin-tab active" data-tab="users">Utilisateurs</button>
       <button class="admin-tab" data-tab="libraries">Bibliothèques</button>
       <button class="admin-tab" data-tab="settings">Réglages</button>
+      <button class="admin-tab" data-tab="logs">Journaux</button>
     </div>
 
     <section id="panel-users" class="admin-panel"></section>
     <section id="panel-libraries" class="admin-panel" hidden></section>
     <section id="panel-settings" class="admin-panel" hidden></section>
+    <section id="panel-logs" class="admin-panel" hidden></section>
   </main>
 </div>
 

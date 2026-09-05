@@ -30,6 +30,14 @@ final class Database
             'remember_token_hash' => 'TEXT',
             'remember_token_expires' => 'TEXT',
         ],
+        'library_jobs' => [
+            'current_item' => 'TEXT',
+        ],
+        'items' => [
+            'metadata_checked_at' => 'TEXT',
+            'file_size' => 'INTEGER',
+            'file_mtime' => 'INTEGER',
+        ],
         'comic_details' => [
             'penciller' => 'TEXT',
             'inker' => 'TEXT',
@@ -42,9 +50,6 @@ final class Database
         'libraries' => [
             'type' => "TEXT NOT NULL DEFAULT 'comic'",
             'last_synced_at' => 'TEXT',
-        ],
-        'items' => [
-            'metadata_checked_at' => 'TEXT',
         ],
         'reading_progress' => [
             'total_pages' => 'INTEGER',

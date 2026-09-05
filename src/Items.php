@@ -18,6 +18,7 @@ final class Items
     private const BASE_FIELDS = [
         'title', 'path', 'format', 'cover_path', 'publisher',
         'library_id', 'series_id', 'issue_number', 'synopsis', 'metadata_checked_at',
+        'file_size', 'file_mtime',
     ];
 
     private const SORTABLE = ['title', 'added_at', 'issue_number'];
@@ -225,6 +226,14 @@ final class Items
     {
         $where = [];
         $params = [];
+        // Unconditional: an item with no library — orphaned by a library
+        // deletion (see Libraries::delete()) — has no permission scope to
+        // check against, so a restricted reader must never see it just
+        // because nothing else filtered it out. The admin's dedicated
+        // orphaned-items cleanup queries library_id IS NULL directly and
+        // bypasses this method entirely, which is the only legitimate way
+        // to still find one.
+        $where[] = 'items.library_id IS NOT NULL';
         if (!empty($filters['type'])) {
             $where[] = 'items.type = :type';
             $params[':type'] = $filters['type'];
