@@ -100,6 +100,9 @@
           <p class="kicker">${esc(kickerParts.join(' · '))}</p>
           <h1>${esc(item.title)}</h1>
           <div class="reader-toolbar" id="readerToolbar" data-item-id="${item.id}">
+            <button type="button" class="reader-btn favorite-btn ${item.is_favorite ? 'is-favorite' : ''}" id="favoriteBtn" title="${item.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favoris">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="${item.is_favorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </button>
             <a class="reader-btn" href="/api/items/${item.id}/download" title="Télécharger localement" aria-label="Télécharger">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
             </a>
@@ -215,6 +218,26 @@
     });
 
     setupReaderToolbar(item.id);
+    setupFavoriteButton(item.id);
+  }
+
+  function setupFavoriteButton(id) {
+    const btn = document.getElementById('favoriteBtn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetchJson(`/api/items/${id}/favorite`, { method: 'POST' });
+        btn.classList.toggle('is-favorite', res.is_favorite);
+        btn.title = res.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris';
+        btn.querySelector('svg').setAttribute('fill', res.is_favorite ? 'currentColor' : 'none');
+      } catch (err) {
+        // a failed toggle just leaves the star as it was — nothing else on
+        // the page depends on this succeeding
+      } finally {
+        btn.disabled = false;
+      }
+    });
   }
 
   function openSynopsisDialog(title, synopsis) {

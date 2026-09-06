@@ -37,6 +37,8 @@
 .reader-btn-active { background: var(--color-accent); color: #fff; }
 .reader-btn-active:hover { background: var(--color-accent); color: #fff; opacity: 0.85; }
 .reader-btn-disabled { opacity: 0.35; pointer-events: none; cursor: default; }
+.favorite-btn.is-favorite { color: #ffc94d; }
+.favorite-btn.is-favorite:hover { color: #ffc94d; opacity: 0.85; }
 
 .reader-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; max-width: 320px; }
 .reader-progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--color-surface-raised); overflow: hidden; }

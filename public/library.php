@@ -43,10 +43,6 @@ Auth::requireReaderPage();
         <ul class="side-list" id="libraryList"></ul>
       </div>
       <div class="side-section">
-        <h6>Séries</h6>
-        <ul class="side-list" id="seriesList"></ul>
-      </div>
-      <div class="side-section">
         <h6>Tags</h6>
         <ul class="side-list tag-list" id="tagList"></ul>
       </div>

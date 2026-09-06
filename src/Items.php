@@ -259,6 +259,10 @@ final class Items
             $where[] = 'items.id IN (SELECT item_id FROM item_tags WHERE tag_id = :tag_id)';
             $params[':tag_id'] = $filters['tag_id'];
         }
+        if (!empty($filters['favorites_for_user'])) {
+            $where[] = 'items.id IN (SELECT item_id FROM favorites WHERE user_id = :fav_user)';
+            $params[':fav_user'] = $filters['favorites_for_user'];
+        }
         if (!empty($filters['query'])) {
             $where[] = '(items.title LIKE :q OR items.publisher LIKE :q)';
             $params[':q'] = '%' . $filters['query'] . '%';

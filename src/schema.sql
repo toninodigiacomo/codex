@@ -147,6 +147,53 @@ CREATE TABLE IF NOT EXISTS reading_progress (
 
 CREATE INDEX IF NOT EXISTS idx_reading_progress_user ON reading_progress(user_id, updated_at);
 
+CREATE TABLE IF NOT EXISTS favorites (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  added_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (user_id, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id, added_at);
+
+-- Customizable outgoing email content — the admin console's Maintenance tab
+-- edits these; src/EmailTemplates.php reads them and substitutes {placeholder}
+-- tokens. Seeded with the standard wording via INSERT OR IGNORE below so a
+-- fresh install always has usable text from the start, and an admin's own
+-- edits are never overwritten by a later schema.sql run (OR IGNORE only
+-- inserts a row that doesn't exist yet).
+CREATE TABLE IF NOT EXISTS email_templates (
+  key        TEXT PRIMARY KEY,
+  subject    TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+INSERT OR IGNORE INTO email_templates (key, subject, body) VALUES
+  ('invitation', 'Ton accès à Codex',
+   'Bonjour {username},
+
+Un accès à la bibliothèque Codex t''a été créé.
+Choisis ton mot de passe ici pour l''activer :
+
+{invite_url}
+
+Ce lien expire dans 7 jours.'),
+  ('email_change_code', 'Confirme ta nouvelle adresse — Codex',
+   'Un changement d''adresse e-mail a été demandé pour ton compte Codex.
+
+Code de confirmation : {code}
+
+Entre ce code dans Codex pour confirmer cette adresse. Il est valable 24 heures.
+Si tu n''es pas à l''origine de cette demande, ignore cet e-mail — ton adresse actuelle reste inchangée.'),
+  ('password_change_code', 'Confirme ton nouveau mot de passe — Codex',
+   'Un changement de mot de passe a été demandé pour ton compte Codex.
+
+Code de confirmation : {code}
+
+Entre ce code dans Codex pour appliquer le nouveau mot de passe. Il est valable 24 heures.
+Si tu n''es pas à l''origine de cette demande, ignore cet e-mail — ton mot de passe actuel reste inchangé.');
+
 -- One row per library, overwritten in place by whichever batch endpoint is
 -- currently driving it (sync / extract-missing / regenerate-covers) — the
 -- persistent "where are we" the admin console's Status area reads, since

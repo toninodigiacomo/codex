@@ -1291,7 +1291,10 @@
     const panel = panels.maintenance;
     panel.innerHTML = '<p class="text-muted">Chargement...</p>';
     try {
-      const s = await api('GET', '/api/settings');
+      const [s, templates] = await Promise.all([
+        api('GET', '/api/settings'),
+        api('GET', '/api/email-templates'),
+      ]);
       panel.innerHTML = `
         <div class="admin-card">
           <h2>Sauvegarde</h2>
@@ -1355,6 +1358,37 @@
           </form>
         </div>
         <div class="admin-card">
+          <h2>Modèles d'e-mails</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            Le texte envoyé pour chaque type de message ci-dessous. <code>{...}</code> marque un emplacement
+            rempli automatiquement au moment de l'envoi — vois la liste sous chaque champ. Un nouveau modèle
+            démarre avec le texte standard ; le modifier ne touche que ce modèle-là, les autres restent
+            inchangés.
+          </p>
+          <div class="field">
+            <label for="templateSelect">Modèle</label>
+            <select class="input" id="templateSelect">
+              ${Object.entries(templates).map(([key, t]) => `<option value="${esc(key)}">${esc(t.label)}</option>`).join('')}
+            </select>
+          </div>
+          <form class="admin-form" id="templateForm">
+            <div class="field">
+              <label for="templateSubject">Objet</label>
+              <input class="input" id="templateSubject" required />
+            </div>
+            <div class="field">
+              <label for="templateBody">Message</label>
+              <textarea class="input" id="templateBody" rows="8" required></textarea>
+              <p class="text-muted" id="templatePlaceholders" style="font-size:12.5px;margin-top:6px;"></p>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button type="submit" class="btn btn-primary">Enregistrer ce modèle</button>
+              <button type="button" class="btn btn-ghost" id="templateResetBtn">Restaurer le texte standard</button>
+            </div>
+            <div id="templateResult"></div>
+          </form>
+        </div>
+        <div class="admin-card">
           <h2>Tester l'envoi</h2>
           <form class="admin-form" id="testForm">
             <div class="admin-form-row">
@@ -1370,6 +1404,53 @@
           </form>
         </div>
       `;
+
+      function loadTemplateIntoForm(key) {
+        const t = templates[key];
+        document.getElementById('templateSubject').value = t.subject;
+        document.getElementById('templateBody').value = t.body;
+        document.getElementById('templatePlaceholders').textContent = t.placeholders.length
+          ? `Emplacements disponibles : ${t.placeholders.map((p) => `{${p}}`).join(', ')}`
+          : '';
+        document.getElementById('templateResult').innerHTML = '';
+      }
+
+      const templateSelect = document.getElementById('templateSelect');
+      loadTemplateIntoForm(templateSelect.value);
+      templateSelect.addEventListener('change', () => loadTemplateIntoForm(templateSelect.value));
+
+      document.getElementById('templateForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const box = document.getElementById('templateResult');
+        const key = templateSelect.value;
+        try {
+          await api('PUT', '/api/email-templates', {
+            key,
+            subject: document.getElementById('templateSubject').value,
+            body: document.getElementById('templateBody').value,
+          });
+          templates[key].subject = document.getElementById('templateSubject').value;
+          templates[key].body = document.getElementById('templateBody').value;
+          box.innerHTML = '<p class="account-success" style="font-size:13px;">Modèle enregistré.</p>';
+        } catch (err) {
+          box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+        }
+      });
+
+      document.getElementById('templateResetBtn').addEventListener('click', async () => {
+        const key = templateSelect.value;
+        if (!confirm(`Restaurer le texte standard pour « ${templates[key].label} » ? Le texte personnalisé actuel sera perdu.`)) return;
+        const box = document.getElementById('templateResult');
+        try {
+          await api('POST', '/api/email-templates-reset', { key });
+          const fresh = await api('GET', '/api/email-templates');
+          templates[key] = fresh[key];
+          loadTemplateIntoForm(key);
+          box.innerHTML = '<p class="account-success" style="font-size:13px;">Texte standard restauré.</p>';
+        } catch (err) {
+          box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+        }
+      });
 
       document.getElementById('smtpForm').addEventListener('submit', async (e) => {
         e.preventDefault();

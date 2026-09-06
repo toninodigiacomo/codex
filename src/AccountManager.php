@@ -6,6 +6,7 @@ require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Mailer.php';
 require_once __DIR__ . '/Totp.php';
 require_once __DIR__ . '/Users.php';
+require_once __DIR__ . '/EmailTemplates.php';
 
 /**
  * Self-service account changes — a user (reader or admin) changing their
@@ -57,14 +58,8 @@ final class AccountManager
             ':id' => $userId,
         ]);
 
-        $mail = Mailer::send(
-            $newEmail,
-            'Confirme ta nouvelle adresse — Codex',
-            "Un changement d'adresse e-mail a été demandé pour ton compte Codex.\n\n"
-            . "Code de confirmation : {$code}\n\n"
-            . "Entre ce code dans Codex pour confirmer cette adresse. Il est valable 24 heures.\n"
-            . "Si tu n'es pas à l'origine de cette demande, ignore cet e-mail — ton adresse actuelle reste inchangée."
-        );
+        $tpl = EmailTemplates::render('email_change_code', ['code' => $code]);
+        $mail = Mailer::send($newEmail, $tpl['subject'], $tpl['body']);
         if (!$mail['ok']) {
             return ['ok' => false, 'error' => "L'e-mail n'a pas pu être envoyé : " . ($mail['error'] ?? 'erreur inconnue')];
         }
@@ -135,14 +130,8 @@ final class AccountManager
             ':id' => $userId,
         ]);
 
-        $mail = Mailer::send(
-            (string) $user['email'],
-            'Confirme ton nouveau mot de passe — Codex',
-            "Un changement de mot de passe a été demandé pour ton compte Codex.\n\n"
-            . "Code de confirmation : {$code}\n\n"
-            . "Entre ce code dans Codex pour appliquer le nouveau mot de passe. Il est valable 24 heures.\n"
-            . "Si tu n'es pas à l'origine de cette demande, ignore cet e-mail — ton mot de passe actuel reste inchangé."
-        );
+        $tpl = EmailTemplates::render('password_change_code', ['code' => $code]);
+        $mail = Mailer::send((string) $user['email'], $tpl['subject'], $tpl['body']);
         if (!$mail['ok']) {
             return ['ok' => false, 'error' => "L'e-mail n'a pas pu être envoyé : " . ($mail['error'] ?? 'erreur inconnue')];
         }

@@ -18,8 +18,10 @@ require_once __DIR__ . '/../../src/Mailer.php';
 require_once __DIR__ . '/../../src/LibraryScanner.php';
 require_once __DIR__ . '/../../src/ItemEnrichment.php';
 require_once __DIR__ . '/../../src/ItemPages.php';
+require_once __DIR__ . '/../../src/Favorites.php';
 require_once __DIR__ . '/../../src/PdfRenderer.php';
 require_once __DIR__ . '/../../src/AccountManager.php';
+require_once __DIR__ . '/../../src/EmailTemplates.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
@@ -216,6 +218,9 @@ try {
                     'tag_id' => isset($_GET['tag_id']) ? (int) $_GET['tag_id'] : null,
                     'query' => $_GET['q'] ?? null,
                 ], fn($v) => $v !== null && $v !== '');
+                if (!empty($_GET['favorites'])) {
+                    $filters['favorites_for_user'] = (int) Auth::currentUser()['id'];
+                }
                 $allowedLibraryIds = currentUserAllowedLibraries();
                 if ($allowedLibraryIds !== null) {
                     if (!$allowedLibraryIds) {
@@ -247,7 +252,16 @@ try {
                 if ($allowedLibraryIds !== null && !in_array((int) $item['library_id'], $allowedLibraryIds, true)) {
                     respond(404, ['error' => 'Item introuvable']);
                 }
+                $item['is_favorite'] = Favorites::isFavorite((int) Auth::currentUser()['id'], $id);
                 respond(200, $item);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'favorite') {
+                // Toggled, not set-to-a-value — the button on item.php has no
+                // separate "remove" affordance, clicking the same star again
+                // is the only way to unfavorite, so it has to flip either way.
+                requireItemAccess($id);
+                $isFavorite = Favorites::toggle((int) Auth::currentUser()['id'], $id);
+                respond(200, ['is_favorite' => $isFavorite]);
             }
             if ($method === 'POST' && $id === null) {
                 $body = bodyJson();
@@ -339,6 +353,12 @@ try {
                         if ($body['completed'] && $totalPages && !array_key_exists('current_page', $body)) {
                             $position = (string) max(0, $totalPages - 1);
                         }
+                    } elseif (array_key_exists('current_page', $body) && $totalPages && $completedAt === null && (int) $position === $totalPages - 1) {
+                        // Reaching the last page during normal reading (not the
+                        // explicit "Lu" button) is itself "finished it" — without
+                        // this, position could sit at 100% indefinitely while the
+                        // star/checkmark toolbar still showed "not read".
+                        $completedAt = date('c');
                     }
 
                     $stmt = $pdo->prepare(
@@ -662,6 +682,31 @@ try {
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
+        case 'email-templates':
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                respond(200, EmailTemplates::all());
+            }
+            if ($method === 'PUT') {
+                $body = bodyJson();
+                $result = EmailTemplates::update(
+                    (string) ($body['key'] ?? ''),
+                    (string) ($body['subject'] ?? ''),
+                    (string) ($body['body'] ?? '')
+                );
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'email-templates-reset':
+            Auth::requireAdminApi();
+            if ($method === 'POST') {
+                $body = bodyJson();
+                $result = EmailTemplates::resetToDefault((string) ($body['key'] ?? ''));
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
         case 'backup':
             // A consistent snapshot even with concurrent writers — VACUUM INTO
             // runs inside its own read transaction and is SQLite's own built-in
@@ -931,14 +976,8 @@ try {
                     !empty($body['mfa_required'])
                 );
                 $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
-                $mailResult = Mailer::send(
-                    (string) $body['email'],
-                    'Ton accès à Codex',
-                    "Bonjour {$user['username']},\n\n"
-                    . "Un accès à la bibliothèque Codex vient de t'être créé.\n"
-                    . "Choisis ton mot de passe ici pour l'activer :\n\n{$inviteUrl}\n\n"
-                    . "Ce lien expire dans 7 jours."
-                );
+                $tpl = EmailTemplates::render('invitation', ['username' => $user['username'], 'invite_url' => $inviteUrl]);
+                $mailResult = Mailer::send((string) $body['email'], $tpl['subject'], $tpl['body']);
                 respond(201, [
                     'user' => $user,
                     'inviteUrl' => $inviteUrl,
@@ -992,11 +1031,8 @@ try {
                 }
                 $token = Users::regenerateInvite($id);
                 $inviteUrl = Settings::siteUrl() . '/accept-invite.php?token=' . urlencode($token);
-                $mailResult = Mailer::send(
-                    (string) $user['email'],
-                    'Ton accès à Codex',
-                    "Bonjour {$user['username']},\n\nVoici un nouveau lien pour activer ton accès à Codex :\n\n{$inviteUrl}\n\nCe lien expire dans 7 jours."
-                );
+                $tpl = EmailTemplates::render('invitation', ['username' => $user['username'], 'invite_url' => $inviteUrl]);
+                $mailResult = Mailer::send((string) $user['email'], $tpl['subject'], $tpl['body']);
                 respond(200, [
                     'inviteUrl' => $inviteUrl,
                     'emailSent' => $mailResult['ok'],

@@ -17,6 +17,7 @@
     library_id: null, // sidebar "Bibliothèques" filter — separate from the éditeur-flow scoping below
     series_id: null,
     tag_id: null,
+    favorites: false, // sidebar "Favoris" filter — this user's own starred items (Favorites.php)
     q: '',
     sort: 'added_at',
     dir: 'DESC',
@@ -45,7 +46,9 @@
   };
 
   let libraries = [];
-  let series = [];
+  // series_id stays in state (below) in case something sets it again later,
+  // but nothing in this file populates a series list or links to one anymore
+  // — removed from the sidebar, too many entries to be useful as a flat list.
   let tags = [];
   let lastBrowseItems = []; // kept so a window resize can re-trim without re-fetching
 
@@ -64,7 +67,6 @@
   const resultCount = document.getElementById('resultCount');
   const activeFilters = document.getElementById('activeFilters');
   const libraryList = document.getElementById('libraryList');
-  const seriesList = document.getElementById('seriesList');
   const tagList = document.getElementById('tagList');
   const searchInput = document.getElementById('searchInput');
   const sortSelect = document.getElementById('sortSelect');
@@ -249,13 +251,12 @@
 
   function renderActiveFilters() {
     const chips = [];
+    if (state.favorites) {
+      chips.push({ key: 'favorites', label: 'Favoris' });
+    }
     if (state.library_id) {
       const l = libraries.find((x) => x.id === state.library_id);
       if (l) chips.push({ key: 'library_id', label: `Bibliothèque : ${l.name}` });
-    }
-    if (state.series_id) {
-      const s = series.find((x) => x.id === state.series_id);
-      if (s) chips.push({ key: 'series_id', label: `Série : ${s.name}` });
     }
     if (state.tag_id) {
       const t = tags.find((x) => x.id === state.tag_id);
@@ -268,7 +269,10 @@
       .join('');
     activeFilters.querySelectorAll('[data-clear]').forEach((el) => {
       el.addEventListener('click', () => {
-        state[el.dataset.clear] = null;
+        state[el.dataset.clear] = el.dataset.clear === 'favorites' ? false : null;
+        if (el.dataset.clear === 'favorites') {
+          document.getElementById('favoritesTab').checked = false;
+        }
         state.page = 1;
         loadItems();
         syncSidebarActiveStates();
@@ -278,7 +282,6 @@
 
   function syncSidebarActiveStates() {
     renderSideList(libraryList, libraries, 'library_id', state.library_id, 'Aucune bibliothèque indexée');
-    renderSideList(seriesList, series, 'series_id', state.series_id, 'Aucune série');
     renderSideList(tagList, tags, 'tag_id', state.tag_id, 'Aucun tag');
     bindSidebarClicks();
     renderActiveFilters();
@@ -293,6 +296,15 @@
         const value = Number(el.dataset.filterValue);
         state[key] = state[key] === value ? null : value;
         state.page = 1;
+        // Same reasoning as the type-tab handler above, in reverse: a
+        // sidebar filter picks a specific library/series/tag directly, so
+        // any type tab selected up top no longer means anything sensible
+        // combined with it — clear it rather than silently ANDing the two
+        // into a filter that can only ever match nothing.
+        state.type = '';
+        state.favorites = false;
+        typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
+        document.getElementById('favoritesTab').checked = false;
         loadItems();
         syncSidebarActiveStates();
       });
@@ -306,6 +318,7 @@
     else if (state.groupLibraryId) params.set('library_id', state.groupLibraryId);
     if (state.series_id) params.set('series_id', state.series_id);
     if (state.tag_id) params.set('tag_id', state.tag_id);
+    if (state.favorites) params.set('favorites', '1');
     if (state.q) params.set('q', state.q);
     if (state.groupPath && state.groupPath.length) params.set('path', JSON.stringify(state.groupPath));
     params.set('sort', state.sort);
@@ -381,7 +394,7 @@
   const NAV_TYPE_LABELS = { comic: 'Bande Dessinée', ebook: 'Ebooks', magazine: 'Magazines', other: 'Fichiers' };
   const TYPE_ORDER = ['comic', 'ebook', 'magazine', 'other'];
 
-  /** Only shows a tab for a type that at least one library actually has — an empty tab isn't useful. */
+  /** Only shows a tab for a type that at least one library actually has — an empty tab isn't useful. Favoris is appended last, styled identically (same .seg-opt) but as a checkbox, not part of the type radio group — it's an orthogonal filter, not a fourth type. */
   function renderTypeTabs() {
     const presentTypes = TYPE_ORDER.filter((t) => libraries.some((l) => l.type === t));
     typeTabs.innerHTML = presentTypes
@@ -391,7 +404,10 @@
           <span>${esc(NAV_TYPE_LABELS[t])}</span>
         </label>`
       )
-      .join('');
+      .join('') + `<label class="seg-opt">
+          <input type="checkbox" id="favoritesTab" ${state.favorites ? 'checked' : ''} />
+          <span>★ Favoris</span>
+        </label>`;
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => {
       input.addEventListener('change', () => {
         const type = input.value;
@@ -403,9 +419,38 @@
           state.page = 1;
           state.groupLibraryId = null;
           state.groupPath = null;
+          // The top tabs and the sidebar's Bibliothèques/Tags/Favoris filters
+          // are two different ways to narrow the same list, not two filters
+          // meant to combine — picking a type here while a specific library
+          // from a *different* type was selected would otherwise silently
+          // AND them together into a combination with zero possible results
+          // (e.g. type=ebook + library_id=<a manga library>).
+          state.library_id = null;
+          state.series_id = null;
+          state.tag_id = null;
+          state.favorites = false;
+          document.getElementById('favoritesTab').checked = false;
           loadItems();
+          syncSidebarActiveStates();
         }
       });
+    });
+
+    document.getElementById('favoritesTab').addEventListener('change', (e) => {
+      switchToBrowseMode();
+      state.favorites = e.target.checked;
+      state.page = 1;
+      if (state.favorites) {
+        // Same one-scope-at-a-time principle as the type tabs vs. sidebar
+        // filters — Favoris spans every type/library, so combining it with
+        // one of those would just narrow it back down in a confusing way.
+        state.type = '';
+        state.library_id = null;
+        state.tag_id = null;
+        typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
+      }
+      loadItems();
+      syncSidebarActiveStates();
     });
   }
 
@@ -621,12 +666,10 @@
 
   Promise.all([
     fetchJson('/api/libraries').catch(() => []),
-    fetchJson('/api/series').catch(() => []),
     fetchJson('/api/tags').catch(() => []),
     fetchJson('/api/display-settings').catch(() => displaySettings),
-  ]).then(([libs, ser, tg, disp]) => {
+  ]).then(([libs, tg, disp]) => {
     libraries = libs;
-    series = ser;
     tags = tg;
     displaySettings = disp;
     gridPageSize = disp.grid_page_size || 80;
