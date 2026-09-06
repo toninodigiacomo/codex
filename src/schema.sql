@@ -103,6 +103,18 @@ CREATE TABLE IF NOT EXISTS users (
   invite_token_expires   TEXT,
   remember_token_hash    TEXT,
   remember_token_expires TEXT,
+  -- Self-service email/password change (src/AccountManager.php): the old
+  -- value stays authoritative/active until a code sent to prove ownership
+  -- is entered — never applied on request alone, so account.js's "leave
+  -- and come back later" flow can't itself weaken the account.
+  pending_email             TEXT,
+  pending_email_code_hash   TEXT,
+  pending_email_expires     TEXT,
+  pending_email_attempts    INTEGER NOT NULL DEFAULT 0,
+  pending_password_hash        TEXT,
+  pending_password_code_hash   TEXT,
+  pending_password_expires     TEXT,
+  pending_password_attempts    INTEGER NOT NULL DEFAULT 0,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 

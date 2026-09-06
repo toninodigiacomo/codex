@@ -39,6 +39,16 @@
 .reader-link-layer { position: absolute; inset: 0; pointer-events: none; }
 .reader-link-layer a {
   position: absolute; display: block; pointer-events: auto; cursor: pointer;
+  /* Above .reader-nav-zone's z-index: 5 — otherwise a link sitting in the
+     left/right 30% of the screen (the page-turn click zones) never
+     receives the click at all, since the nav zone is visually on top of
+     it there and wins the hit-test regardless of pointer-events on
+     .reader-link-layer itself (that only governs the *layer*, not
+     whichever element the browser picks when two positioned elements
+     overlap). The empty parts of the link layer still fall through to
+     the nav zone underneath as before — only an actual <a> here claims
+     the click. */
+  z-index: 6;
   /* Uncomment while debugging where PDF.js placed a link:
      background: rgba(255, 90, 31, 0.25); border: 1px solid var(--color-accent); */
 }

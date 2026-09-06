@@ -58,9 +58,6 @@
   const groupBackBtn = document.getElementById('groupBackBtn');
   const typeTabs = document.getElementById('typeTabs');
   const homeBtn = document.getElementById('homeBtn');
-  const userMenu = document.getElementById('userMenu');
-  const userMenuTrigger = document.getElementById('userMenuTrigger');
-  const userMenuDropdown = document.getElementById('userMenuDropdown');
   const homeEmptyState = document.getElementById('homeEmptyState');
   const grid = document.getElementById('itemGrid');
   const emptyState = document.getElementById('emptyState');
@@ -586,16 +583,6 @@
   homeBtn.addEventListener('click', (e) => {
     e.preventDefault();
     switchToHomeMode();
-  });
-
-  userMenuTrigger.addEventListener('click', (e) => {
-    e.stopPropagation();
-    userMenuDropdown.hidden = !userMenuDropdown.hidden;
-    userMenu.toggleAttribute('data-open', !userMenuDropdown.hidden);
-  });
-  document.addEventListener('click', () => {
-    userMenuDropdown.hidden = true;
-    userMenu.removeAttribute('data-open');
   });
 
   let searchTimer = null;

@@ -25,7 +25,11 @@ $me = Auth::currentUser();
     <a href="library.php" class="nav-brand" style="text-decoration:none;">Codex</a>
     <a href="library.php" class="btn btn-ghost">&larr; Bibliothèque</a>
     <span style="margin-left:auto;"></span>
-    <a href="logout.php" class="btn btn-ghost">Déconnexion (<?= htmlspecialchars($me['username']) ?>)</a>
+    <div class="user-menu" id="userMenu">
+      <button type="button" class="user-menu-trigger" id="userMenuTrigger" data-account-trigger>
+        <?= htmlspecialchars($me['username']) ?>
+      </button>
+    </div>
   </nav>
 
   <main class="admin-main">
@@ -47,6 +51,7 @@ $me = Auth::currentUser();
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="<?= asset('js/account.js') ?>"></script>
 <script src="<?= asset('js/admin.js') ?>"></script>
 
 </body>

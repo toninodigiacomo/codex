@@ -85,7 +85,14 @@
     const page = await pdfDoc.getPage(index + 1); // PDF.js pages are 1-based
     const outputScale = window.devicePixelRatio || 1;
     const unscaled = page.getViewport({ scale: 1 });
-    const maxWidth = pdfWrap.parentElement.clientWidth || window.innerWidth;
+    // window.innerWidth, not the wrap's own clientWidth: .reader-image-wrap
+    // is a flex container sized to its *content*, and before the first
+    // render the canvas has no size yet — a chicken-and-egg that measured
+    // as ~0px. #readerImage sidesteps this entirely with a viewport-relative
+    // max-width in CSS instead of JS; matching that unit here (rather than
+    // reading a layout size that depends on what we're about to draw into
+    // it) is what the fix actually is.
+    const maxWidth = window.innerWidth;
     const maxHeight = availableHeight();
     const scale = Math.min(maxWidth / unscaled.width, maxHeight / unscaled.height, 3); // cap at 3x native — a huge page shouldn't demand a huge canvas just because the window is huge
     const viewport = page.getViewport({ scale });
@@ -155,10 +162,20 @@
   async function goToPdfDestination(dest) {
     try {
       const explicit = typeof dest === 'string' ? await pdfDoc.getDestination(dest) : dest;
-      if (Array.isArray(explicit) && explicit[0] !== undefined) {
-        const pageIndex = await pdfDoc.getPageIndex(explicit[0]);
-        goTo(pageIndex);
+      if (!Array.isArray(explicit) || explicit[0] === undefined || explicit[0] === null) {
+        return;
       }
+      const target = explicit[0];
+      // Per spec this should always be a reference to a page object — but
+      // some PDF generators put a plain page index here instead (not
+      // compliant, but real files do this; see one of Tonino's PDFs where
+      // internal links otherwise silently did nothing). PDF.js's own
+      // official viewer treats a bare number here as a direct 0-based page
+      // index rather than rejecting it, so matching that is what makes a
+      // link behave the same way it would in Chrome or Firefox's built-in
+      // viewer — both are also built on PDF.js.
+      const pageIndex = typeof target === 'number' ? target : await pdfDoc.getPageIndex(target);
+      goTo(pageIndex);
     } catch (_) {
       // a destination PDF.js couldn't resolve (a malformed or unusual PDF) —
       // silently doing nothing beats a JS error breaking the rest of the reader

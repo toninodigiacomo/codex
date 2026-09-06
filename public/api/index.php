@@ -19,6 +19,7 @@ require_once __DIR__ . '/../../src/LibraryScanner.php';
 require_once __DIR__ . '/../../src/ItemEnrichment.php';
 require_once __DIR__ . '/../../src/ItemPages.php';
 require_once __DIR__ . '/../../src/PdfRenderer.php';
+require_once __DIR__ . '/../../src/AccountManager.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
@@ -708,6 +709,82 @@ try {
                 }
                 Auth::clearLoginAttemptsFor($ip);
                 respond(200, ['cleared' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account':
+            // Self-service — any logged-in user (reader or admin) acting on
+            // their own account only. Every write here goes through
+            // AccountManager, which never applies an email/password change
+            // on the strength of the request alone — see its own docblock.
+            if ($method === 'GET') {
+                $me = Auth::currentUser();
+                respond(200, AccountManager::statusFor((int) $me['id']));
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-email-request':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                $body = bodyJson();
+                $result = AccountManager::requestEmailChange((int) $me['id'], (string) ($body['email'] ?? ''));
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-email-confirm':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                $body = bodyJson();
+                $result = AccountManager::confirmEmailChange((int) $me['id'], (string) ($body['code'] ?? ''));
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-email-cancel':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                AccountManager::cancelEmailChange((int) $me['id']);
+                respond(200, ['ok' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-password-request':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                $body = bodyJson();
+                $result = AccountManager::requestPasswordChange((int) $me['id'], (string) ($body['new_password'] ?? ''));
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-password-confirm':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                $body = bodyJson();
+                $result = AccountManager::confirmPasswordChange((int) $me['id'], (string) ($body['code'] ?? ''));
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-password-cancel':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                AccountManager::cancelPasswordChange((int) $me['id']);
+                respond(200, ['ok' => true]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'account-password-mfa':
+            if ($method === 'POST') {
+                $me = Auth::currentUser();
+                $body = bodyJson();
+                $result = AccountManager::changePasswordWithMfa(
+                    (int) $me['id'],
+                    (string) ($body['new_password'] ?? ''),
+                    (string) ($body['totp_code'] ?? '')
+                );
+                $result['ok'] ? respond(200, ['ok' => true]) : respond(400, ['error' => $result['error']]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 

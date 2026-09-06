@@ -30,13 +30,9 @@ Auth::requireReaderPage();
     </div>
     <?php // admins never reach this page — see Auth::requireReaderPage() ?>
     <div class="user-menu" id="userMenu">
-      <button type="button" class="user-menu-trigger" id="userMenuTrigger">
+      <button type="button" class="user-menu-trigger" id="userMenuTrigger" data-account-trigger data-show-email="1">
         <?= htmlspecialchars($_SESSION['username'] ?? '') ?>
-        <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
-      <div class="user-menu-dropdown" id="userMenuDropdown" hidden>
-        <a href="logout.php">Déconnexion</a>
-      </div>
     </div>
   </nav>
 
@@ -125,6 +121,7 @@ Auth::requireReaderPage();
   </div>
 </div>
 
+<script src="<?= asset('js/account.js') ?>"></script>
 <script src="<?= asset('js/library.js') ?>"></script>
 
 </body>
