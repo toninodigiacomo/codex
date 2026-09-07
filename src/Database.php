@@ -125,6 +125,7 @@ final class Database
         self::repairDanglingUserReferences($pdo);
         self::relaxUsersPasswordHashConstraint($pdo);
         self::allowReaderBasicRole($pdo);
+        self::mergeDuplicateTagsAndEnforceCaseInsensitivity($pdo);
     }
 
     /**
@@ -343,5 +344,85 @@ final class Database
              ON CONFLICT(key) DO UPDATE SET value = \'1\''
         );
         $stmt->execute([':key' => $key]);
+    }
+
+    /**
+     * tags.name's UNIQUE constraint had no COLLATE NOCASE (unlike
+     * users.username, which always did) — SQLite's default comparison is
+     * case-sensitive, so "Transformers" and "TRANSFORMERS" (say, one typed
+     * by hand and one imported from a ComicInfo.xml's <Characters> field
+     * in a different case) were silently accepted as two unrelated tags.
+     * Both display identically in the sidebar and on an item's own tag
+     * chips, so nothing *looked* wrong — until clicking one found only
+     * some of the items actually carrying "that" tag, because half of
+     * them were, invisibly, carrying the other row.
+     *
+     * Fixing the column alone isn't enough: switching to COLLATE NOCASE
+     * while duplicate-cased rows still exist would make the rebuild's own
+     * data copy violate the new, stricter UNIQUE constraint. So this
+     * merges first — for each group of tags that only differ by case,
+     * keeps the lowest id, re-points every item_tags row at it (INSERT OR
+     * IGNORE, since an item carrying both duplicates would otherwise
+     * collide with item_tags' own UNIQUE(item_id, tag_id) once they're
+     * merged into one), and drops the now-redundant rows — before
+     * rebuilding the table with the corrected column definition.
+     */
+    private static function mergeDuplicateTagsAndEnforceCaseInsensitivity(PDO $pdo): void
+    {
+        $marker = $pdo->query("SELECT value FROM settings WHERE key = 'schema_tags_case_insensitive'")->fetchColumn();
+        if ($marker === '1') {
+            return;
+        }
+
+        $exists = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='tags'")->fetchColumn();
+        if (!$exists) {
+            return;
+        }
+
+        $pdo->exec('PRAGMA foreign_keys = OFF');
+        $pdo->exec('PRAGMA legacy_alter_table = ON');
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $tableSql = $pdo->query("SELECT sql FROM sqlite_master WHERE type='table' AND name='tags'")->fetchColumn();
+            if ($tableSql !== false && stripos((string) $tableSql, 'COLLATE NOCASE') !== false) {
+                // a concurrent request already finished this while we were waiting for the write lock
+                self::setMigrationMarker($pdo, 'schema_tags_case_insensitive');
+                $pdo->exec('COMMIT');
+                return;
+            }
+
+            $groups = [];
+            foreach ($pdo->query('SELECT id, name FROM tags ORDER BY id')->fetchAll() as $row) {
+                $groups[mb_strtolower($row['name'])][] = (int) $row['id'];
+            }
+            foreach ($groups as $ids) {
+                if (count($ids) < 2) {
+                    continue;
+                }
+                $survivor = min($ids);
+                foreach ($ids as $duplicateId) {
+                    if ($duplicateId === $survivor) {
+                        continue;
+                    }
+                    $pdo->prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id) SELECT item_id, ? FROM item_tags WHERE tag_id = ?')
+                        ->execute([$survivor, $duplicateId]);
+                    $pdo->prepare('DELETE FROM item_tags WHERE tag_id = ?')->execute([$duplicateId]);
+                    $pdo->prepare('DELETE FROM tags WHERE id = ?')->execute([$duplicateId]);
+                }
+            }
+
+            $pdo->exec('ALTER TABLE tags RENAME TO tags_pre_case_migration');
+            $pdo->exec('CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE)');
+            $pdo->exec('INSERT INTO tags (id, name) SELECT id, name FROM tags_pre_case_migration');
+            $pdo->exec('DROP TABLE tags_pre_case_migration');
+            self::setMigrationMarker($pdo, 'schema_tags_case_insensitive');
+            $pdo->exec('COMMIT');
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK');
+            throw $e;
+        } finally {
+            $pdo->exec('PRAGMA legacy_alter_table = OFF');
+            $pdo->exec('PRAGMA foreign_keys = ON');
+        }
     }
 }

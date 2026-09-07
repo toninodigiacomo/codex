@@ -6,8 +6,10 @@ require_once __DIR__ . '/../src/Auth.php';
 require_once __DIR__ . '/../src/AppLog.php';
 AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
+require_once __DIR__ . '/../src/I18n.php';
 
 Auth::bootSession();
+I18n::boot();
 
 if (!Auth::isSetupComplete()) {
     header('Location: /setup.php');
@@ -25,7 +27,7 @@ $justWelcomed = isset($_GET['welcome']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::isLockedOut()) {
         $wait = (int) ceil(Auth::secondsUntilUnlock() / 60);
-        $error = "Trop de tentatives échouées. Réessaie dans environ {$wait} minute(s).";
+        $error = t('login.error_locked_out', ['minutes' => $wait]);
     } else {
         $username = trim((string) ($_POST['username'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
@@ -41,16 +43,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: /mfa-setup.php');
             exit;
         }
-        $error = "Nom d'utilisateur, mot de passe ou code invalide.";
+        $error = t('login.error_invalid');
     }
 }
 ?>
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Connexion — Codex</title>
+<title><?= htmlspecialchars(t('login.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
@@ -62,8 +64,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       radial-gradient(120% 90% at 15% 100%, color-mix(in srgb, var(--color-accent) 30%, transparent), transparent 60%),
       var(--color-neutral-900);
     color: var(--color-neutral-100);
-    padding: 34px 34px 27px; display: flex; flex-direction: column; justify-content: space-between;
+    padding: 34px 34px 27px; display: flex; flex-direction: column;
   }
+  /* Logo pinned at its natural top position; this second (and now only
+     other) child grows to fill the rest of the panel and centers its own
+     content within that space — same "logo top, pitch centered" feel as
+     when a third block (the old spec-row) sat at the bottom keeping the
+     middle one roughly centered by itself; removing that block without
+     this would leave just two items pinned to opposite ends instead. */
+  .pitch > div:last-child { flex: 1; display: flex; flex-direction: column; justify-content: center; }
   .pitch-brand { display: flex; align-items: baseline; gap: 9px; }
   .pitch-brand .name { font-family: var(--font-heading); font-weight: 900; font-size: 22px; letter-spacing: -0.02em; }
   .pitch-brand .sub { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.55; }
@@ -99,30 +108,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="split">
   <div class="pitch">
     <div class="pitch-brand">
-      <span class="name">Codex</span>
-      <span class="sub">library server</span>
+      <span class="name"><?= htmlspecialchars(t('app.name')) ?></span>
+      <span class="sub"><?= htmlspecialchars(t('login.pitch_sub')) ?></span>
     </div>
     <div>
-      <h1>Toute ma bibliothèque, à portée de clic.</h1>
-      <p>BD, ebooks, magazines et scans — indexés depuis mes propres disques, lisibles depuis n'importe quel navigateur.</p>
-    </div>
-    <div class="spec-row">
-      <div><div class="k">Formats</div><div class="v">CBZ · EPUB · PDF</div></div>
-      <div><div class="k">Bibliothèque</div><div class="v">Personnelle</div></div>
-      <div><div class="k">Hébergement</div><div class="v">Local</div></div>
+      <h1><?= htmlspecialchars(t('login.pitch_h1')) ?></h1>
+      <p><?= htmlspecialchars(t('login.pitch_p')) ?></p>
     </div>
   </div>
 
   <div class="form-side">
     <div class="form-wrap">
-      <p class="step-label">Connexion</p>
-      <h2>Se connecter</h2>
-      <p class="text-muted lead">Utilise le compte que l'administrateur t'a créé.</p>
+      <p class="step-label"><?= htmlspecialchars(t('login.step_label')) ?></p>
+      <h2><?= htmlspecialchars(t('login.heading')) ?></h2>
+      <p class="text-muted lead"><?= htmlspecialchars(t('login.lead')) ?></p>
 
       <?php if ($justSetUp && !$error): ?>
-        <div class="success-box">Compte créé. Connecte-toi avec ton mot de passe et un code de ton application.</div>
+        <div class="success-box"><?= htmlspecialchars(t('login.success_setup')) ?></div>
       <?php elseif ($justWelcomed && !$error): ?>
-        <div class="success-box">Compte activé — tu peux te connecter.</div>
+        <div class="success-box"><?= htmlspecialchars(t('login.success_welcome')) ?></div>
       <?php endif; ?>
       <?php if ($error): ?>
         <div class="error-box"><?= htmlspecialchars($error) ?></div>
@@ -130,37 +134,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       <form class="field-stack" method="post">
         <div class="field">
-          <label for="username">Nom d'utilisateur</label>
+          <label for="username"><?= htmlspecialchars(t('login.username')) ?></label>
           <input class="input" id="username" name="username" required autofocus />
         </div>
         <div class="field">
-          <label for="password">Mot de passe</label>
+          <label for="password"><?= htmlspecialchars(t('login.password')) ?></label>
           <div class="password-field">
             <input class="input" id="password" name="password" type="password" required autocomplete="current-password" />
-            <button type="button" class="password-toggle" id="passwordToggle" aria-label="Afficher le mot de passe">👁</button>
+            <button type="button" class="password-toggle" id="passwordToggle" aria-label="<?= htmlspecialchars(t('login.password_show')) ?>" data-show-label="<?= htmlspecialchars(t('login.password_show')) ?>" data-hide-label="<?= htmlspecialchars(t('login.password_hide')) ?>">👁</button>
           </div>
         </div>
         <div class="field">
-          <label for="totp_code">Code à 6 chiffres (si l'authentification à deux facteurs est activée)</label>
-          <input class="input" id="totp_code" name="totp_code" pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" placeholder="Laisser vide si MFA désactivée" />
+          <label for="totp_code"><?= htmlspecialchars(t('login.totp_label')) ?></label>
+          <input class="input" id="totp_code" name="totp_code" pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" placeholder="<?= htmlspecialchars(t('login.totp_placeholder')) ?>" />
         </div>
         <label class="remember-row">
           <input type="checkbox" id="remember" name="remember" />
-          Se souvenir de moi pendant 3 mois
+          <?= htmlspecialchars(t('login.remember')) ?>
         </label>
-        <button type="submit" class="btn btn-primary btn-block">Continuer</button>
+        <button type="submit" class="btn btn-primary btn-block"><?= htmlspecialchars(t('login.continue')) ?></button>
       </form>
+      <p style="margin-top:18px;font-size:12.5px;opacity:0.6;">
+        <a href="#" data-lang-switch="fr" style="<?= I18n::locale() === 'fr' ? 'font-weight:700;' : '' ?>">Français</a>
+        &nbsp;·&nbsp;
+        <a href="#" data-lang-switch="en" style="<?= I18n::locale() === 'en' ? 'font-weight:700;' : '' ?>">English</a>
+      </p>
     </div>
   </div>
 </div>
 
+<script>window.I18N = <?= json_encode(I18n::all(), JSON_UNESCAPED_UNICODE) ?>;</script>
+<script src="<?= asset('js/i18n.js') ?>"></script>
 <script>
   document.getElementById('passwordToggle').addEventListener('click', function () {
     var field = document.getElementById('password');
     var showing = field.type === 'text';
     field.type = showing ? 'password' : 'text';
     this.textContent = showing ? '👁' : '🙈';
-    this.setAttribute('aria-label', showing ? 'Afficher le mot de passe' : 'Masquer le mot de passe');
+    this.setAttribute('aria-label', showing ? this.dataset.showLabel : this.dataset.hideLabel);
   });
 </script>
 

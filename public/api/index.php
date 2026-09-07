@@ -885,6 +885,42 @@ try {
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
+        case 'cleanup-wrong-format':
+            // Same GET-preview/POST-delete shape as cleanup-excluded — but
+            // matching against LibraryScanner::TYPE_ALLOWED_FORMATS instead
+            // of the exclude pattern, for whatever got indexed before that
+            // per-type filter existed (a stray image sitting in a comic or
+            // magazine folder, say).
+            Auth::requireAdminApi();
+            $pdo = Database::connection();
+            $allowedByType = [
+                'comic' => ['cbz', 'cbr', 'pdf', 'epub'],
+                'ebook' => ['pdf', 'epub'],
+                'magazine' => ['pdf'],
+                'other' => ['jpg', 'png', 'bmp', 'heic', 'tiff'],
+            ];
+            $matches = [];
+            $rows = $pdo->query(
+                'SELECT items.id, items.title, items.path, items.format, libraries.type AS library_type, libraries.name AS library_name
+                 FROM items JOIN libraries ON libraries.id = items.library_id'
+            )->fetchAll();
+            foreach ($rows as $row) {
+                $allowed = $allowedByType[$row['library_type']] ?? null;
+                if ($allowed !== null && !in_array($row['format'], $allowed, true)) {
+                    $matches[] = $row;
+                }
+            }
+            if ($method === 'GET') {
+                respond(200, ['matches' => $matches]);
+            }
+            if ($method === 'POST') {
+                foreach ($matches as $row) {
+                    Items::delete((int) $row['id']);
+                }
+                respond(200, ['deleted' => count($matches), 'items' => $matches]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
         case 'cleanup-excluded':
             Auth::requireAdminApi();
             $pattern = Settings::scanExcludePattern();

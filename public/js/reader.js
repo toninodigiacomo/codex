@@ -187,7 +187,7 @@
     currentIndex = index;
     clearStatus();
     if (isPdf) {
-      renderPdfPage(index).catch(() => showStatus('Cette page est indisponible.'));
+      renderPdfPage(index).catch(() => showStatus(t('reader.page_unavailable')));
     } else {
       imageEl.src = pageUrl(index);
       preload(index + 1);
@@ -244,7 +244,7 @@
 
   imageEl.addEventListener('error', () => {
     if (!isPdf && imageEl.getAttribute('src')) {
-      showStatus('Cette page est indisponible.');
+      showStatus(t('reader.page_unavailable'));
     }
   });
 
@@ -268,7 +268,7 @@
       ]);
 
       titleEl.textContent = item.title;
-      document.title = item.title + ' — Codex';
+      document.title = item.title + ' — ' + t('app.name');
 
       if (item.format === 'pdf' && typeof pdfjsLib !== 'undefined') {
         try {
@@ -292,7 +292,7 @@
       }
 
       if (totalPages === 0) {
-        showStatus("Ce fichier n'est pas lisible dans le lecteur intégré.");
+        showStatus(t('reader.format_not_readable'));
         pageIndicator.textContent = '';
         progressTrack.style.display = 'none';
         prevZone.hidden = true;
@@ -311,8 +311,8 @@
       }
       goTo(startIndex, { skipSave: true });
     } catch (err) {
-      titleEl.textContent = 'Erreur';
-      showStatus(err.message || "Impossible de charger cet élément.");
+      titleEl.textContent = t('common.error');
+      showStatus(err.message || t('reader.load_error'));
       pageIndicator.textContent = '';
     }
   }

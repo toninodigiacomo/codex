@@ -36,6 +36,31 @@ final class LibraryScanner
         'png' => 'png',
         'gif' => 'gif',
         'webp' => 'webp',
+        'bmp' => 'bmp',
+        'heic' => 'heic',
+        'tif' => 'tiff',
+        'tiff' => 'tiff',
+    ];
+
+    /**
+     * Which formats a library's own declared type is actually allowed to
+     * pick up as a *new* item — a stray image sitting in a comic or
+     * magazine folder (a scan leftover, a folder.jpg-like sidecar that
+     * scan_exclude_pattern's name-based matching didn't happen to catch)
+     * must never silently become an item of its own just because its
+     * extension is one this app generally knows how to read. Checked only
+     * when creating a new item during sync (below) — deliberately not
+     * baked into EXTENSION_FORMATS/walk() itself, so an item that already
+     * exists (from before this existed, or from a library later
+     * re-typed) is never mistaken for orphaned just because its format no
+     * longer suits its library's type; see cleanup-wrong-format in
+     * api/index.php for actually removing those.
+     */
+    private const TYPE_ALLOWED_FORMATS = [
+        'comic' => ['cbz', 'cbr', 'pdf', 'epub'],
+        'ebook' => ['pdf', 'epub'],
+        'magazine' => ['pdf'],
+        'other' => ['jpg', 'png', 'bmp', 'heic', 'tiff'],
     ];
 
     private const MAX_DEPTH = 16; // guards against a pathological symlink loop, not a realistic library depth
@@ -127,6 +152,12 @@ final class LibraryScanner
 
             $ext = strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
             $format = self::EXTENSION_FORMATS[$ext] ?? $ext;
+
+            $allowedFormats = self::TYPE_ALLOWED_FORMATS[$library['type']] ?? null;
+            if ($allowedFormats !== null && !in_array($format, $allowedFormats, true)) {
+                continue; // a format this library's type doesn't accept — e.g. a stray image sitting in a comic folder — never becomes an item, but isn't reported as anything either (not added, not conflicted); it just stays invisible to this library, same as an excluded filename
+            }
+
             $title = pathinfo($absPath, PATHINFO_FILENAME);
 
             try {

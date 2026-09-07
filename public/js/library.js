@@ -5,7 +5,7 @@
     return div.innerHTML;
   }
 
-  const TYPE_LABELS = { comic: 'BD', ebook: 'Ebook', magazine: 'Magazine', other: 'Autre' };
+  const TYPE_LABEL_KEYS = { comic: 'type.comic_short', ebook: 'type.ebook_short', magazine: 'type.magazine_short', other: 'type.other_short' };
   const HOME_SHELF_TYPES = ['comic', 'ebook', 'magazine', 'other'];
 
   let gridPageSize = 80; // replaced by display-settings once loaded, see applyDisplaySettings
@@ -138,7 +138,7 @@
     return `
       <a class="item-card" href="item.php?id=${esc(item.id)}">
         <div class="item-cover">
-          <span class="type-chip">${esc(TYPE_LABELS[item.type] || item.type)}</span>
+          <span class="type-chip">${esc(TYPE_LABEL_KEYS[item.type] ? t(TYPE_LABEL_KEYS[item.type]) : item.type)}</span>
           ${coverMarkup(item)}
         </div>
         <div class="item-title">${esc(item.title)}</div>
@@ -156,13 +156,14 @@
    * many rows are kept at all (used for the homepage shelves); pass null
    * for "keep everything, just drop the partial last row".
    */
+  /** $maxRows caps how many full rows to show before the rest gets trimmed off — used by the home shelves so a partial row doesn't look broken right where horizontal scrolling would start. $maxRows === null means no cap at all (the main paginated browse grid): every item passed in is kept, never rounded down to a row multiple — the bug this comment replaces did that unconditionally, silently dropping a page's trailing partial row (e.g. 18 results in 10 columns kept only the first 10) even though nothing asked for a cap. */
   function renderGridTrimmed(gridEl, items, maxRows) {
     gridEl.innerHTML = items.map(itemCardHtml).join('');
-    if (!items.length) {
-      return 0;
+    if (!items.length || !maxRows) {
+      return items.length;
     }
     const cols = getComputedStyle(gridEl).gridTemplateColumns.split(' ').filter(Boolean).length || 1;
-    const rowCap = maxRows ? maxRows * cols : items.length;
+    const rowCap = maxRows * cols;
     const capped = Math.min(items.length, rowCap);
     // Round down to a full row — but only once there IS at least one full
     // row: with fewer items than one row holds, rounding down lands on 0,
@@ -252,15 +253,15 @@
   function renderActiveFilters() {
     const chips = [];
     if (state.favorites) {
-      chips.push({ key: 'favorites', label: 'Favoris' });
+      chips.push({ key: 'favorites', label: t('library.chip_favorites') });
     }
     if (state.library_id) {
       const l = libraries.find((x) => x.id === state.library_id);
-      if (l) chips.push({ key: 'library_id', label: `Bibliothèque : ${l.name}` });
+      if (l) chips.push({ key: 'library_id', label: t('library.chip_library', { name: l.name }) });
     }
     if (state.tag_id) {
-      const t = tags.find((x) => x.id === state.tag_id);
-      if (t) chips.push({ key: 'tag_id', label: `Tag : ${t.name}` });
+      const tagObj = tags.find((x) => x.id === state.tag_id);
+      if (tagObj) chips.push({ key: 'tag_id', label: t('library.chip_tag', { name: tagObj.name }) });
     }
     activeFilters.innerHTML = chips
       .map(
@@ -281,8 +282,8 @@
   }
 
   function syncSidebarActiveStates() {
-    renderSideList(libraryList, libraries, 'library_id', state.library_id, 'Aucune bibliothèque indexée');
-    renderSideList(tagList, tags, 'tag_id', state.tag_id, 'Aucun tag');
+    renderSideList(libraryList, libraries, 'library_id', state.library_id, t('library.no_library_indexed'));
+    renderSideList(tagList, tags, 'tag_id', state.tag_id, t('library.no_tag'));
     bindSidebarClicks();
     renderActiveFilters();
   }
@@ -303,6 +304,8 @@
         // into a filter that can only ever match nothing.
         state.type = '';
         state.favorites = false;
+        state.groupPath = null;
+        state.groupLibraryId = null;
         typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
         document.getElementById('favoritesTab').checked = false;
         loadItems();
@@ -320,7 +323,15 @@
     if (state.tag_id) params.set('tag_id', state.tag_id);
     if (state.favorites) params.set('favorites', '1');
     if (state.q) params.set('q', state.q);
-    if (state.groupPath && state.groupPath.length) params.set('path', JSON.stringify(state.groupPath));
+    if (state.mode === 'browse' && state.groupPath && state.groupPath.length) {
+      // Only meaningful while browsing *inside* a group-flow drill-down
+      // (state.mode stays 'browse' there too, for the standalone items
+      // sitting alongside subfolder tiles at that level) — a stale
+      // groupPath left over from an earlier visit must never leak into an
+      // ordinary sidebar/type-tab browse, which has nothing to do with
+      // any folder depth at all.
+      params.set('path', JSON.stringify(state.groupPath));
+    }
     params.set('sort', state.sort);
     params.set('dir', state.dir);
     params.set('limit', String(gridPageSize));
@@ -331,7 +342,7 @@
     // and visibly swap out once it resolves, which reads as a glitch more
     // than a loading state.
     grid.innerHTML = '';
-    resultCount.textContent = 'Chargement...';
+    resultCount.textContent = t('common.loading');
     emptyState.hidden = true;
     pagination.hidden = true;
 
@@ -339,17 +350,17 @@
       const data = await fetchJson(`/api/items?${params.toString()}`);
       lastBrowseItems = data.items;
       renderGridTrimmed(grid, data.items, null);
-      resultCount.textContent = `${data.total} résultat${data.total === 1 ? '' : 's'}`;
+      resultCount.textContent = t(data.total === 1 ? 'library.result_count_one' : 'library.result_count_other', { count: data.total });
       emptyState.hidden = data.items.length !== 0;
       grid.hidden = data.items.length === 0;
       renderPagination(data.total);
       browseBackBtn.hidden = state.groupPath === null;
-      browseBackBtn.textContent = state.groupPath && state.groupPath.length ? `← ${state.groupPath[state.groupPath.length - 1]}` : '← Retour';
+      browseBackBtn.textContent = state.groupPath && state.groupPath.length ? `← ${state.groupPath[state.groupPath.length - 1]}` : t('library.back');
     } catch (err) {
       grid.innerHTML = '';
       resultCount.textContent = '';
       emptyState.hidden = false;
-      emptyState.textContent = `Impossible de charger la bibliothèque (${err.message}).`;
+      emptyState.textContent = t('library.load_error', { message: err.message });
       pagination.hidden = true;
     }
   }
@@ -365,11 +376,11 @@
     }
     container.hidden = false;
     container.innerHTML = `
-      <button type="button" class="btn btn-secondary" data-page-action="first" ${currentPage <= 1 ? 'disabled' : ''} aria-label="Première page">«</button>
-      <button type="button" class="btn btn-secondary" data-page-action="prev" ${currentPage <= 1 ? 'disabled' : ''} aria-label="Page précédente">‹</button>
+      <button type="button" class="btn btn-secondary" data-page-action="first" ${currentPage <= 1 ? 'disabled' : ''} aria-label="${esc(t('library.page_first'))}">«</button>
+      <button type="button" class="btn btn-secondary" data-page-action="prev" ${currentPage <= 1 ? 'disabled' : ''} aria-label="${esc(t('library.page_prev'))}">‹</button>
       <span class="page-indicator">${currentPage} / ${totalPages}</span>
-      <button type="button" class="btn btn-secondary" data-page-action="next" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="Page suivante">›</button>
-      <button type="button" class="btn btn-secondary" data-page-action="last" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="Dernière page">»</button>
+      <button type="button" class="btn btn-secondary" data-page-action="next" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="${esc(t('library.page_next'))}">›</button>
+      <button type="button" class="btn btn-secondary" data-page-action="last" ${currentPage >= totalPages ? 'disabled' : ''} aria-label="${esc(t('library.page_last'))}">»</button>
     `;
     container.querySelectorAll('[data-page-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -391,26 +402,36 @@
     });
   }
 
-  const NAV_TYPE_LABELS = { comic: 'Bande Dessinée', ebook: 'Ebooks', magazine: 'Magazines', other: 'Fichiers' };
   const TYPE_ORDER = ['comic', 'ebook', 'magazine', 'other'];
+  const NAV_TYPE_KEYS = { comic: 'type.comic', ebook: 'type.ebook', magazine: 'type.magazine', other: 'type.other' };
 
   /** Only shows a tab for a type that at least one library actually has — an empty tab isn't useful. Favoris is appended last, styled identically (same .seg-opt) but as a checkbox, not part of the type radio group — it's an orthogonal filter, not a fourth type. */
   function renderTypeTabs() {
-    const presentTypes = TYPE_ORDER.filter((t) => libraries.some((l) => l.type === t));
+    const presentTypes = TYPE_ORDER.filter((ty) => libraries.some((l) => l.type === ty));
     typeTabs.innerHTML = presentTypes
       .map(
-        (t) => `<label class="seg-opt">
-          <input type="radio" name="type" value="${t}" ${state.type === t ? 'checked' : ''} />
-          <span>${esc(NAV_TYPE_LABELS[t])}</span>
+        (ty) => `<label class="seg-opt">
+          <input type="radio" name="type" value="${ty}" ${state.type === ty ? 'checked' : ''} />
+          <span>${esc(t(NAV_TYPE_KEYS[ty]))}</span>
         </label>`
       )
       .join('') + `<label class="seg-opt">
           <input type="checkbox" id="favoritesTab" ${state.favorites ? 'checked' : ''} />
-          <span>★ Favoris</span>
+          <span>★ ${esc(t('library.chip_favorites'))}</span>
         </label>`;
     typeTabs.querySelectorAll('input[name="type"]').forEach((input) => {
       input.addEventListener('change', () => {
         const type = input.value;
+        // Same one-scope-at-a-time rule applies here too, regardless of
+        // which branch handles the actual navigation below — a sidebar
+        // library/tag left highlighted after using a top tab was exactly
+        // that rule silently not applying to this branch.
+        state.library_id = null;
+        state.series_id = null;
+        state.tag_id = null;
+        state.favorites = false;
+        document.getElementById('favoritesTab').checked = false;
+        syncSidebarActiveStates();
         if (displaySettings.show_publishers) {
           startGroupFlow(type);
         } else {
@@ -419,19 +440,7 @@
           state.page = 1;
           state.groupLibraryId = null;
           state.groupPath = null;
-          // The top tabs and the sidebar's Bibliothèques/Tags/Favoris filters
-          // are two different ways to narrow the same list, not two filters
-          // meant to combine — picking a type here while a specific library
-          // from a *different* type was selected would otherwise silently
-          // AND them together into a combination with zero possible results
-          // (e.g. type=ebook + library_id=<a manga library>).
-          state.library_id = null;
-          state.series_id = null;
-          state.tag_id = null;
-          state.favorites = false;
-          document.getElementById('favoritesTab').checked = false;
           loadItems();
-          syncSidebarActiveStates();
         }
       });
     });
@@ -447,6 +456,8 @@
         state.type = '';
         state.library_id = null;
         state.tag_id = null;
+        state.groupPath = null;
+        state.groupLibraryId = null;
         typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = false; });
       }
       loadItems();
@@ -472,7 +483,7 @@
     browseView.hidden = true;
     groupView.hidden = false;
     groupViewTitle.textContent = title;
-    groupBackBtn.textContent = '← Retour';
+    groupBackBtn.textContent = t('library.back');
     groupGrid.innerHTML = '';
     groupEmptyState.hidden = true;
     groupPagination.hidden = true;
@@ -501,7 +512,7 @@
     state.groupLibraryName = null;
     state.groupSkippedLibraryLevel = false;
     state.groupPath = null;
-    showGroupView('Bibliothèques');
+    showGroupView(t('library.sidebar_libraries'));
 
     try {
       const groups = preloaded || (await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`));
@@ -517,7 +528,7 @@
       });
     } catch (err) {
       groupEmptyState.hidden = false;
-      groupEmptyState.textContent = `Erreur : ${err.message}`;
+      groupEmptyState.textContent = t('library.generic_error', { message: err.message });
     }
   }
 
@@ -549,7 +560,7 @@
     // previous éditeur/collection's tiles stay on screen for the length of
     // the request and visibly swap out once it resolves, which reads as a
     // glitch more than a loading state (same fix as loadItems').
-    showGroupView(path.length ? `Collections — ${path[path.length - 1]}` : `Éditeurs — ${libraryName}`);
+    showGroupView(path.length ? t('library.collections_title', { name: path[path.length - 1] }) : t('library.editors_title', { name: libraryName }));
 
     const pathQuery = encodeURIComponent(JSON.stringify(path));
     const baseParams = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}&path=${pathQuery}`;
@@ -573,7 +584,7 @@
       });
     } catch (err) {
       groupEmptyState.hidden = false;
-      groupEmptyState.textContent = `Erreur : ${err.message}`;
+      groupEmptyState.textContent = t('library.generic_error', { message: err.message });
       groupPagination.hidden = true;
     }
   }

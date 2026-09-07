@@ -23,7 +23,7 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error || `Erreur ${res.status}`);
+      throw new Error(data.error || `${t('common.error')} ${res.status}`);
     }
     return data;
   }
@@ -40,13 +40,13 @@
     return div.innerHTML;
   }
 
-  function passwordFieldHtml(id, label) {
+  function passwordFieldHtml(id, labelKey) {
     return `
       <div class="account-field">
-        <label for="${id}">${label}</label>
+        <label for="${id}">${esc(t(labelKey))}</label>
         <div class="account-password-row">
           <input class="input" id="${id}" type="password" minlength="12" autocomplete="new-password" required />
-          <button type="button" class="account-password-toggle" data-toggle-for="${id}">Afficher</button>
+          <button type="button" class="account-password-toggle" data-toggle-for="${id}">${esc(t('account.show'))}</button>
         </div>
       </div>`;
   }
@@ -57,14 +57,15 @@
         const input = root.querySelector(`#${btn.dataset.toggleFor}`);
         const showing = input.type === 'text';
         input.type = showing ? 'password' : 'text';
-        btn.textContent = showing ? 'Afficher' : 'Cacher';
+        btn.textContent = showing ? t('account.show') : t('account.hide');
       });
     });
   }
 
   function formatExpiry(iso) {
     const d = new Date(iso);
-    return d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const locale = document.documentElement.lang || 'fr';
+    return d.toLocaleDateString(locale) + ' ' + t('account.at_time') + ' ' + d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
   }
 
   function initAccountMenu(trigger) {
@@ -93,15 +94,15 @@
       backdrop = document.createElement('div');
       backdrop.className = 'dialog-backdrop';
       backdrop.innerHTML = `
-        <div class="dialog account-dialog" role="dialog" aria-modal="true" aria-label="Mon compte">
-          <div class="dialog-title">Mon compte</div>
+        <div class="dialog account-dialog" role="dialog" aria-modal="true" aria-label="${esc(t('account.my_account'))}">
+          <div class="dialog-title">${esc(t('account.my_account'))}</div>
           ${showEmail ? '<div class="account-section" id="accountEmailSection"></div>' : ''}
           <div class="account-section" id="accountPasswordSection"></div>
           <div class="account-section">
-            <a class="btn btn-secondary" href="logout.php">Se déconnecter</a>
+            <a class="btn btn-secondary" href="logout.php">${esc(t('nav.logout'))}</a>
           </div>
           <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" id="accountCloseBtn">Fermer</button>
+            <button type="button" class="btn btn-ghost" id="accountCloseBtn">${esc(t('common.close'))}</button>
           </div>
         </div>`;
       document.body.appendChild(backdrop);
@@ -114,8 +115,8 @@
       });
       backdrop.querySelector('#accountCloseBtn').addEventListener('click', close);
 
-      if (emailSection) emailSection.innerHTML = '<p class="text-muted">Chargement...</p>';
-      passwordSection.innerHTML = '<p class="text-muted">Chargement...</p>';
+      if (emailSection) emailSection.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+      passwordSection.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
       try {
         const status = await api('GET', '/api/account');
         if (emailSection) renderEmail(status);
@@ -135,18 +136,18 @@
     function renderEmail(status) {
       if (status.pending_email) {
         emailSection.innerHTML = `
-          <h3>Adresse e-mail</h3>
+          <h3>${esc(t('account.email_address'))}</h3>
           <div class="account-pending-banner">
-            En attente de validation pour <strong>${esc(status.pending_email)}</strong> — expire le ${formatExpiry(status.pending_email_expires)}.
-            Tant que ce n'est pas confirmé, <strong>${esc(status.email || '(aucune adresse actuelle)')}</strong> reste l'adresse active.
+            ${t('account.pending_email_banner', { email: esc(status.pending_email), expiry: formatExpiry(status.pending_email_expires) })}
+            ${t('account.pending_email_active', { email: esc(status.email || t('account.no_current_address')) })}
           </div>
           <div class="account-field">
-            <label for="emailCode">Code reçu par e-mail</label>
+            <label for="emailCode">${esc(t('account.code_received'))}</label>
             <input class="input account-code-input" id="emailCode" inputmode="numeric" maxlength="6" placeholder="000000" />
           </div>
           <div style="display:flex;gap:8px;">
-            <button type="button" class="btn btn-primary" id="emailConfirmBtn">Valider</button>
-            <button type="button" class="btn btn-ghost" id="emailCancelBtn">Annuler la demande</button>
+            <button type="button" class="btn btn-primary" id="emailConfirmBtn">${esc(t('account.validate'))}</button>
+            <button type="button" class="btn btn-ghost" id="emailCancelBtn">${esc(t('account.cancel_request'))}</button>
           </div>
           <div id="emailResult"></div>`;
 
@@ -156,7 +157,7 @@
           if (!code) return;
           try {
             await api('POST', '/api/account-email-confirm', { code });
-            resultEl.innerHTML = '<p class="account-success">Adresse confirmée.</p>';
+            resultEl.innerHTML = `<p class="account-success">${esc(t('account.email_confirmed'))}</p>`;
             const fresh = await api('GET', '/api/account');
             renderEmail(fresh);
           } catch (err) {
@@ -176,13 +177,13 @@
       }
 
       emailSection.innerHTML = `
-        <h3>Adresse e-mail</h3>
-        <p class="text-muted" style="font-size:13px;margin-top:-4px;">Actuelle : ${esc(status.email || '(aucune)')}</p>
+        <h3>${esc(t('account.email_address'))}</h3>
+        <p class="text-muted" style="font-size:13px;margin-top:-4px;">${esc(t('account.current_address', { email: status.email || t('account.none') }))}</p>
         <div class="account-field">
-          <label for="newEmail">Nouvelle adresse</label>
+          <label for="newEmail">${esc(t('account.new_address'))}</label>
           <input class="input" id="newEmail" type="email" required />
         </div>
-        <button type="button" class="btn btn-primary" id="emailRequestBtn" disabled>Envoyer un code</button>
+        <button type="button" class="btn btn-primary" id="emailRequestBtn" disabled>${esc(t('account.send_code'))}</button>
         <div id="emailResult"></div>`;
 
       const newEmailInput = backdrop.querySelector('#newEmail');
@@ -195,7 +196,7 @@
         const resultEl = backdrop.querySelector('#emailResult');
         const email = newEmailInput.value.trim();
         if (!EMAIL_PATTERN.test(email)) return;
-        resultEl.innerHTML = '<p class="text-muted">Envoi...</p>';
+        resultEl.innerHTML = `<p class="text-muted">${esc(t('account.sending'))}</p>`;
         try {
           await api('POST', '/api/account-email-request', { email });
           const fresh = await api('GET', '/api/account');
@@ -222,14 +223,13 @@
 
     function renderPasswordRequestForm() {
       passwordSection.innerHTML = `
-        <h3>Mot de passe</h3>
+        <h3>${esc(t('account.password'))}</h3>
         <p class="text-muted" style="font-size:13px;margin-top:-4px;">
-          Un code de confirmation sera envoyé à ton adresse actuelle — le mot de passe actuel reste valide tant
-          qu'il n'est pas entré.
+          ${esc(t('account.password_request_hint'))}
         </p>
-        ${passwordFieldHtml('newPassword1', 'Nouveau mot de passe (12 caractères minimum)')}
-        ${passwordFieldHtml('newPassword2', 'Confirmer le nouveau mot de passe')}
-        <button type="button" class="btn btn-primary" id="passwordRequestBtn">Envoyer un code</button>
+        ${passwordFieldHtml('newPassword1', 'account.new_password_min')}
+        ${passwordFieldHtml('newPassword2', 'account.confirm_new_password')}
+        <button type="button" class="btn btn-primary" id="passwordRequestBtn">${esc(t('account.send_code'))}</button>
         <div id="passwordResult"></div>`;
       bindPasswordToggle(passwordSection);
 
@@ -238,14 +238,14 @@
         const p1 = passwordSection.querySelector('#newPassword1').value;
         const p2 = passwordSection.querySelector('#newPassword2').value;
         if (p1.length < 12) {
-          resultEl.innerHTML = '<p class="account-error">12 caractères minimum.</p>';
+          resultEl.innerHTML = `<p class="account-error">${esc(t('account.min_12_chars'))}</p>`;
           return;
         }
         if (p1 !== p2) {
-          resultEl.innerHTML = '<p class="account-error">Les deux mots de passe ne correspondent pas.</p>';
+          resultEl.innerHTML = `<p class="account-error">${esc(t('account.passwords_mismatch'))}</p>`;
           return;
         }
-        resultEl.innerHTML = '<p class="text-muted">Envoi...</p>';
+        resultEl.innerHTML = `<p class="text-muted">${esc(t('account.sending'))}</p>`;
         try {
           await api('POST', '/api/account-password-request', { new_password: p1 });
           const fresh = await api('GET', '/api/account');
@@ -258,18 +258,18 @@
 
     function renderPasswordPendingConfirm(status) {
       passwordSection.innerHTML = `
-        <h3>Mot de passe</h3>
+        <h3>${esc(t('account.password'))}</h3>
         <div class="account-pending-banner">
-          Un code a été envoyé à ton adresse actuelle — expire le ${formatExpiry(status.pending_password_expires)}.
-          Le mot de passe actuel reste valide tant que ce n'est pas confirmé.
+          ${t('account.pending_password_banner', { expiry: formatExpiry(status.pending_password_expires) })}
+          ${esc(t('account.pending_password_active'))}
         </div>
         <div class="account-field">
-          <label for="passwordCode">Code reçu par e-mail</label>
+          <label for="passwordCode">${esc(t('account.code_received'))}</label>
           <input class="input account-code-input" id="passwordCode" inputmode="numeric" maxlength="6" placeholder="000000" />
         </div>
         <div style="display:flex;gap:8px;">
-          <button type="button" class="btn btn-primary" id="passwordConfirmBtn">Valider</button>
-          <button type="button" class="btn btn-ghost" id="passwordCancelBtn">Annuler la demande</button>
+          <button type="button" class="btn btn-primary" id="passwordConfirmBtn">${esc(t('account.validate'))}</button>
+          <button type="button" class="btn btn-ghost" id="passwordCancelBtn">${esc(t('account.cancel_request'))}</button>
         </div>
         <div id="passwordResult"></div>`;
 
@@ -279,7 +279,7 @@
         if (!code) return;
         try {
           await api('POST', '/api/account-password-confirm', { code });
-          resultEl.innerHTML = '<p class="account-success">Mot de passe changé.</p>';
+          resultEl.innerHTML = `<p class="account-success">${esc(t('account.password_changed'))}</p>`;
           const fresh = await api('GET', '/api/account');
           renderPassword(fresh);
         } catch (err) {
@@ -299,18 +299,17 @@
 
     function renderPasswordMfaForm() {
       passwordSection.innerHTML = `
-        <h3>Mot de passe</h3>
+        <h3>${esc(t('account.password'))}</h3>
         <p class="text-muted" style="font-size:13px;margin-top:-4px;">
-          La double authentification est active sur ce compte — pas besoin de code par e-mail, le code de ton
-          application d'authentification suffit à confirmer le changement immédiatement.
+          ${esc(t('account.mfa_password_hint'))}
         </p>
-        ${passwordFieldHtml('newPassword1', 'Nouveau mot de passe (12 caractères minimum)')}
-        ${passwordFieldHtml('newPassword2', 'Confirmer le nouveau mot de passe')}
+        ${passwordFieldHtml('newPassword1', 'account.new_password_min')}
+        ${passwordFieldHtml('newPassword2', 'account.confirm_new_password')}
         <div class="account-field">
-          <label for="mfaCode">Code de l'application d'authentification</label>
+          <label for="mfaCode">${esc(t('account.mfa_code_label'))}</label>
           <input class="input account-code-input" id="mfaCode" inputmode="numeric" maxlength="6" placeholder="000000" />
         </div>
-        <button type="button" class="btn btn-primary" id="passwordMfaBtn">Changer le mot de passe</button>
+        <button type="button" class="btn btn-primary" id="passwordMfaBtn">${esc(t('account.change_password'))}</button>
         <div id="passwordResult"></div>`;
       bindPasswordToggle(passwordSection);
 
@@ -320,21 +319,21 @@
         const p2 = passwordSection.querySelector('#newPassword2').value;
         const totp = passwordSection.querySelector('#mfaCode').value.trim();
         if (p1.length < 12) {
-          resultEl.innerHTML = '<p class="account-error">12 caractères minimum.</p>';
+          resultEl.innerHTML = `<p class="account-error">${esc(t('account.min_12_chars'))}</p>`;
           return;
         }
         if (p1 !== p2) {
-          resultEl.innerHTML = '<p class="account-error">Les deux mots de passe ne correspondent pas.</p>';
+          resultEl.innerHTML = `<p class="account-error">${esc(t('account.passwords_mismatch'))}</p>`;
           return;
         }
         if (!totp) {
-          resultEl.innerHTML = '<p class="account-error">Code de double authentification requis.</p>';
+          resultEl.innerHTML = `<p class="account-error">${esc(t('account.mfa_code_required'))}</p>`;
           return;
         }
-        resultEl.innerHTML = '<p class="text-muted">Vérification...</p>';
+        resultEl.innerHTML = `<p class="text-muted">${esc(t('account.verifying'))}</p>`;
         try {
           await api('POST', '/api/account-password-mfa', { new_password: p1, totp_code: totp });
-          resultEl.innerHTML = '<p class="account-success">Mot de passe changé.</p>';
+          resultEl.innerHTML = `<p class="account-success">${esc(t('account.password_changed'))}</p>`;
           passwordSection.querySelector('#newPassword1').value = '';
           passwordSection.querySelector('#newPassword2').value = '';
           passwordSection.querySelector('#mfaCode').value = '';

@@ -4,16 +4,18 @@ require_once __DIR__ . '/../src/Auth.php';
 require_once __DIR__ . '/../src/AppLog.php';
 AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
+require_once __DIR__ . '/../src/I18n.php';
 Auth::bootSession();
+I18n::boot();
 Auth::requireAdmin();
 $me = Auth::currentUser();
 ?>
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Administration — Codex</title>
+<title><?= htmlspecialchars(t('admin.title')) ?></title>
 <meta name="current-user-id" content="<?= (int) $me['id'] ?>" />
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <link rel="stylesheet" href="<?= asset('css/admin.css') ?>" />
@@ -23,7 +25,7 @@ $me = Auth::currentUser();
 <div class="app-shell">
   <nav class="nav topbar">
     <a href="library.php" class="nav-brand" style="text-decoration:none;">Codex</a>
-    <a href="library.php" class="btn btn-ghost">&larr; Bibliothèque</a>
+    <a href="library.php" class="btn btn-ghost"><?= htmlspecialchars(t('nav.library')) ?></a>
     <span style="margin-left:auto;"></span>
     <div class="user-menu" id="userMenu">
       <button type="button" class="user-menu-trigger" id="userMenuTrigger" data-account-trigger>
@@ -34,11 +36,11 @@ $me = Auth::currentUser();
 
   <main class="admin-main">
     <div class="admin-tabs" role="tablist">
-      <button class="admin-tab active" data-tab="users">Utilisateurs</button>
-      <button class="admin-tab" data-tab="libraries">Bibliothèques</button>
-      <button class="admin-tab" data-tab="settings">Réglages</button>
-      <button class="admin-tab" data-tab="maintenance">Maintenance</button>
-      <button class="admin-tab" data-tab="system">Système</button>
+      <button class="admin-tab active" data-tab="users"><?= htmlspecialchars(t('admin.tab_users')) ?></button>
+      <button class="admin-tab" data-tab="libraries"><?= htmlspecialchars(t('admin.tab_libraries')) ?></button>
+      <button class="admin-tab" data-tab="settings"><?= htmlspecialchars(t('admin.tab_settings')) ?></button>
+      <button class="admin-tab" data-tab="maintenance"><?= htmlspecialchars(t('admin.tab_maintenance')) ?></button>
+      <button class="admin-tab" data-tab="system"><?= htmlspecialchars(t('admin.tab_system')) ?></button>
     </div>
 
     <section id="panel-users" class="admin-panel"></section>
@@ -51,6 +53,8 @@ $me = Auth::currentUser();
 
 <div class="toast" id="toast" hidden></div>
 
+<script>window.I18N = <?= json_encode(I18n::all(), JSON_UNESCAPED_UNICODE) ?>;</script>
+<script src="<?= asset('js/i18n.js') ?>"></script>
 <script src="<?= asset('js/account.js') ?>"></script>
 <script src="<?= asset('js/admin.js') ?>"></script>
 

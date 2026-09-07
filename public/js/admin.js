@@ -22,7 +22,7 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const message = data.error || `Erreur ${res.status}`;
+      const message = data.error || `${t('common.error')} ${res.status}`;
       throw new Error(data.detail ? `${message} : ${data.detail}` : message);
     }
     return data;
@@ -63,51 +63,51 @@
   // ============================================================
   async function renderUsersTab() {
     const panel = panels.users;
-    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
       const [users, libraries] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/libraries')]);
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>Utilisateurs (${users.length})</h2>
+          <h2>${esc(t('admin.users_heading', { count: users.length }))}</h2>
           <div class="admin-list" id="userList"></div>
         </div>
         <div class="admin-card">
-          <h2>Inviter un utilisateur</h2>
+          <h2>${esc(t('admin.invite_user'))}</h2>
           <form class="admin-form" id="inviteForm">
             <div class="admin-form-row">
               <div class="field">
-                <label for="invUsername">Nom d'utilisateur</label>
+                <label for="invUsername">${esc(t('login.username'))}</label>
                 <input class="input" id="invUsername" required minlength="3" />
               </div>
               <div class="field">
-                <label for="invEmail">Adresse e-mail</label>
+                <label for="invEmail">${esc(t('account.email_address'))}</label>
                 <input class="input" id="invEmail" type="email" required />
               </div>
               <div class="field">
-                <label for="invRole">Rôle</label>
+                <label for="invRole">${esc(t('admin.role'))}</label>
                 <select class="input" id="invRole">
-                  <option value="reader_basic" selected>Utilisateur</option>
-                  <option value="reader">Utilisateur avancé</option>
-                  <option value="admin">Administrateur</option>
+                  <option value="reader_basic" selected>${esc(t('admin.role_user'))}</option>
+                  <option value="reader">${esc(t('admin.role_advanced_user'))}</option>
+                  <option value="admin">${esc(t('admin.role_admin'))}</option>
                 </select>
               </div>
             </div>
             <div class="field">
-              <label>Bibliothèques accessibles</label>
+              <label>${esc(t('admin.accessible_libraries'))}</label>
               <div class="lib-checks" id="invLibChecks">
                 ${
                   libraries.length
                     ? libraries.map((l) => `<label class="lib-check"><input type="checkbox" value="${l.id}" /> ${esc(l.name)}</label>`).join('')
-                    : '<span class="text-muted" style="font-size:13px;">Aucune bibliothèque configurée — onglet "Bibliothèques".</span>'
+                    : `<span class="text-muted" style="font-size:13px;">${esc(t('admin.no_library_configured'))}</span>`
                 }
               </div>
             </div>
             <label class="mfa-force-toggle">
               <input type="checkbox" id="invMfaRequired" />
-              Exiger l'authentification à deux facteurs (l'utilisateur devra la configurer, pas de choix)
+              ${esc(t('admin.require_mfa'))}
             </label>
             <div>
-              <button type="submit" class="btn btn-primary">Envoyer l'invitation</button>
+              <button type="submit" class="btn btn-primary">${esc(t('admin.send_invite'))}</button>
             </div>
             <div id="inviteResult"></div>
           </form>
@@ -130,18 +130,18 @@
           resultBox.innerHTML = `
             <div class="invite-link-box">
               <span class="status ${res.emailSent ? 'status-ok' : 'status-fail'}">
-                ${res.emailSent ? '✓ E-mail envoyé.' : `⚠ E-mail non envoyé${res.emailError ? ' (' + esc(res.emailError) + ')' : ''} — copie ce lien manuellement :`}
+                ${res.emailSent ? '✓ ' + t('admin.email_sent') : '⚠ ' + t('admin.email_not_sent', { detail: res.emailError ? ' (' + esc(res.emailError) + ')' : '' })}
               </span>
               ${esc(res.inviteUrl)}
             </div>`;
-          showToast('Utilisateur invité.');
+          showToast(t('admin.user_invited'));
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
         }
       });
     } catch (err) {
-      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
   }
 
@@ -150,8 +150,8 @@
     backdrop.className = 'dialog-backdrop';
     backdrop.innerHTML = `
       <div class="dialog">
-        <div class="dialog-title">Bibliothèques accessibles — ${esc(user.username)}</div>
-        <div class="dialog-body">Par défaut, un lecteur n'a accès à rien. Coche les bibliothèques auxquelles il doit pouvoir accéder.</div>
+        <div class="dialog-title">${esc(t('admin.accessible_libraries'))} — ${esc(user.username)}</div>
+        <div class="dialog-body">${esc(t('admin.access_editor_hint'))}</div>
         <div class="lib-checks">
           ${
             libraries.length
@@ -161,12 +161,12 @@
                       `<label class="lib-check"><input type="checkbox" value="${l.id}" ${user.library_ids.includes(l.id) ? 'checked' : ''} /> ${esc(l.name)}</label>`
                   )
                   .join('')
-              : '<span class="text-muted" style="font-size:13px;">Aucune bibliothèque configurée.</span>'
+              : `<span class="text-muted" style="font-size:13px;">${esc(t('admin.no_library_configured_short'))}</span>`
           }
         </div>
         <div class="dialog-actions">
-          <button type="button" class="btn btn-secondary" id="laCancel">Annuler</button>
-          <button type="button" class="btn btn-primary" id="laSave">Enregistrer</button>
+          <button type="button" class="btn btn-secondary" id="laCancel">${esc(t('common.cancel'))}</button>
+          <button type="button" class="btn btn-primary" id="laSave">${esc(t('common.save'))}</button>
         </div>
       </div>`;
     document.body.appendChild(backdrop);
@@ -177,7 +177,7 @@
       const libraryIds = Array.from(backdrop.querySelectorAll('.lib-checks input:checked')).map((el) => Number(el.value));
       try {
         await api('PUT', `/api/users/${user.id}`, { library_ids: libraryIds });
-        showToast('Accès mis à jour.');
+        showToast(t('admin.access_updated'));
         backdrop.remove();
         renderUsersTab();
       } catch (err) {
@@ -189,10 +189,10 @@
   function renderUserList(users, libraries) {
     const list = document.getElementById('userList');
     if (!users.length) {
-      list.innerHTML = '<p class="text-muted">Aucun utilisateur.</p>';
+      list.innerHTML = `<p class="text-muted">${esc(t('admin.no_user'))}</p>`;
       return;
     }
-    const ROLE_LABELS = { admin: 'Admin', reader: 'Utilisateur avancé', reader_basic: 'Utilisateur' };
+    const ROLE_LABELS = { admin: t('admin.role_admin_short'), reader: t('admin.role_advanced_user'), reader_basic: t('admin.role_user') };
 
     list.innerHTML = users
       .map((u) => {
@@ -206,14 +206,14 @@
         </div>
         <div class="admin-row-badges">
           <span class="badge ${u.role === 'admin' ? 'badge-admin' : 'badge-reader'}">${esc(ROLE_LABELS[u.role] || u.role)}</span>
-          <span class="badge ${u.status === 'active' ? 'badge-active' : 'badge-invited'}">${u.status === 'active' ? 'Actif' : 'Invité'}</span>
-          ${u.status === 'active' ? `<span class="badge ${u.mfa_enabled ? 'badge-mfa' : 'badge-nomfa'}">${u.mfa_enabled ? 'MFA activée' : 'MFA désactivée'}</span>` : ''}
-          ${u.mfa_required ? `<span class="badge badge-mfa">MFA exigée</span>` : ''}
+          <span class="badge ${u.status === 'active' ? 'badge-active' : 'badge-invited'}">${u.status === 'active' ? esc(t('admin.status_active')) : esc(t('admin.status_invited'))}</span>
+          ${u.status === 'active' ? `<span class="badge ${u.mfa_enabled ? 'badge-mfa' : 'badge-nomfa'}">${u.mfa_enabled ? esc(t('admin.mfa_enabled')) : esc(t('admin.mfa_disabled'))}</span>` : ''}
+          ${u.mfa_required ? `<span class="badge badge-mfa">${esc(t('admin.mfa_required_badge'))}</span>` : ''}
           ${
             isReaderTier
               ? libNames.length
                 ? `<span class="badge badge-reader">${esc(libNames.join(', '))}</span>`
-                : `<span class="badge badge-noaccess">Aucun accès</span>`
+                : `<span class="badge badge-noaccess">${esc(t('admin.no_access'))}</span>`
               : ''
           }
         </div>
@@ -225,10 +225,10 @@
                 </select>`
               : ''
           }
-          ${isReaderTier ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">Bibliothèques...</button>` : ''}
-          <button class="btn btn-secondary btn-sm" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? 'Lever l\'exigence MFA' : 'Exiger la MFA'}</button>
-          ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm" data-resend="${u.id}">Renvoyer</button>` : ''}
-          ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm" data-delete-user="${u.id}">Supprimer</button>` : ''}
+          ${isReaderTier ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">${esc(t('admin.libraries_ellipsis'))}</button>` : ''}
+          <button class="btn btn-secondary btn-sm" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? esc(t('admin.lift_mfa_requirement')) : esc(t('admin.require_mfa_short'))}</button>
+          ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm" data-resend="${u.id}">${esc(t('admin.resend'))}</button>` : ''}
+          ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm" data-delete-user="${u.id}">${esc(t('common.delete'))}</button>` : ''}
         </div>
       </div>`;
       })
@@ -238,7 +238,7 @@
       sel.addEventListener('change', async () => {
         try {
           await api('PUT', `/api/users/${sel.dataset.changeRole}`, { role: sel.value });
-          showToast('Rôle mis à jour.');
+          showToast(t('admin.role_updated'));
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -259,7 +259,7 @@
         const nextValue = btn.dataset.current !== '1';
         try {
           await api('PUT', `/api/users/${btn.dataset.toggleMfa}`, { mfa_required: nextValue });
-          showToast(nextValue ? 'MFA exigée pour cet utilisateur.' : 'Exigence MFA levée.');
+          showToast(nextValue ? t('admin.mfa_now_required') : t('admin.mfa_requirement_lifted'));
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -271,7 +271,7 @@
       btn.addEventListener('click', async () => {
         try {
           const res = await api('POST', `/api/invites/${btn.dataset.resend}/resend`);
-          alert((res.emailSent ? 'E-mail renvoyé.' : `E-mail non envoyé (${res.emailError || 'inconnu'}). Lien :`) + '\n' + res.inviteUrl);
+          alert((res.emailSent ? t('admin.email_resent') : t('admin.email_not_sent_short', { error: res.emailError || t('admin.unknown') })) + '\n' + res.inviteUrl);
         } catch (err) {
           showToast(err.message, true);
         }
@@ -279,10 +279,10 @@
     });
     list.querySelectorAll('[data-delete-user]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Supprimer cet utilisateur ?')) return;
+        if (!confirm(t('admin.confirm_delete_user'))) return;
         try {
           await api('DELETE', `/api/users/${btn.dataset.deleteUser}`);
-          showToast('Utilisateur supprimé.');
+          showToast(t('admin.user_deleted'));
           renderUsersTab();
         } catch (err) {
           showToast(err.message, true);
@@ -299,12 +299,12 @@
     backdrop.className = 'dialog-backdrop';
     backdrop.innerHTML = `
       <div class="dialog folder-picker">
-        <div class="dialog-title">Choisir un dossier</div>
+        <div class="dialog-title">${esc(t('admin.choose_folder'))}</div>
         <div class="folder-picker-path" id="fpPath"></div>
-        <div class="folder-picker-list" id="fpList"><p class="text-muted">Chargement...</p></div>
+        <div class="folder-picker-list" id="fpList"><p class="text-muted">${esc(t('common.loading'))}</p></div>
         <div class="dialog-actions">
-          <button type="button" class="btn btn-secondary" id="fpCancel">Annuler</button>
-          <button type="button" class="btn btn-primary" id="fpChoose">Choisir ce dossier</button>
+          <button type="button" class="btn btn-secondary" id="fpCancel">${esc(t('common.cancel'))}</button>
+          <button type="button" class="btn btn-primary" id="fpChoose">${esc(t('admin.choose_this_folder'))}</button>
         </div>
       </div>`;
     document.body.appendChild(backdrop);
@@ -314,24 +314,24 @@
     async function load(path) {
       const pathEl = document.getElementById('fpPath');
       const listEl = document.getElementById('fpList');
-      listEl.innerHTML = '<p class="text-muted">Chargement...</p>';
+      listEl.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
       try {
         const res = await api('GET', `/api/browse-libraries?path=${encodeURIComponent(path)}`);
         current = res.path;
         pathEl.textContent = 'libraries/' + (res.path || '');
         const rows = [];
         if (res.parent !== null) {
-          rows.push(`<button type="button" class="folder-picker-item" data-nav="${esc(res.parent)}">.. (dossier parent)</button>`);
+          rows.push(`<button type="button" class="folder-picker-item" data-nav="${esc(res.parent)}">.. (${esc(t('admin.parent_folder'))})</button>`);
         }
         res.entries.forEach((entry) => {
           rows.push(`<button type="button" class="folder-picker-item" data-nav="${esc(entry.path)}">📁 ${esc(entry.name)}</button>`);
         });
-        listEl.innerHTML = rows.length ? rows.join('') : '<p class="text-muted">Aucun sous-dossier ici.</p>';
+        listEl.innerHTML = rows.length ? rows.join('') : `<p class="text-muted">${esc(t('admin.no_subfolder'))}</p>`;
         listEl.querySelectorAll('[data-nav]').forEach((btn) => {
           btn.addEventListener('click', () => load(btn.dataset.nav));
         });
       } catch (err) {
-        listEl.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+        listEl.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
       }
     }
 
@@ -345,27 +345,29 @@
     load(startPath || '');
   }
 
-  const TYPE_LABELS = { comic: 'BD', ebook: 'Ebook', magazine: 'Magazine', other: 'Autre' };
+  const TYPE_LABEL_KEYS = { comic: 'type.comic_short', ebook: 'type.ebook_short', magazine: 'type.magazine_short', other: 'type.other_short' };
 
   function typeOptionsHtml(selected) {
-    return Object.entries(TYPE_LABELS)
-      .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`)
+    return Object.entries(TYPE_LABEL_KEYS)
+      .map(([value, labelKey]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${esc(t(labelKey))}</option>`)
       .join('');
   }
 
   function formatSyncDate(iso) {
-    if (!iso) return 'Jamais synchronisée';
+    if (!iso) return t('admin.never_synced');
     const d = new Date(iso);
-    return 'Synchronisée le ' + d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const locale = document.documentElement.lang || 'fr';
+    return t('admin.synced_on', { date: d.toLocaleDateString(locale) + ' ' + t('account.at_time') + ' ' + d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) });
   }
 
   function formatCount(n) {
-    return new Intl.NumberFormat('fr-FR').format(n || 0);
+    const locale = document.documentElement.lang || 'fr';
+    return new Intl.NumberFormat(locale).format(n || 0);
   }
 
   function formatBytes(bytes) {
-    if (!bytes) return '0 Ko';
-    const units = ['o', 'Ko', 'Mo', 'Go'];
+    if (!bytes) return '0 ' + t('admin.unit_kb');
+    const units = [t('admin.unit_b'), t('admin.unit_kb'), t('admin.unit_mb'), t('admin.unit_gb')];
     let i = 0;
     let n = bytes;
     while (n >= 1024 && i < units.length - 1) {
@@ -382,7 +384,7 @@
       const lib = libs.find((l) => String(l.id) === String(libId));
       const metaEl = document.getElementById(`lib-meta-${libId}`);
       if (lib && metaEl) {
-        metaEl.textContent = `libraries/${lib.path} — ${formatSyncDate(lib.last_synced_at)} — ${formatCount(lib.item_count)} objet${lib.item_count === 1 ? '' : 's'}`;
+        metaEl.textContent = `libraries/${lib.path} — ${formatSyncDate(lib.last_synced_at)} — ${t('admin.item_count', { count: formatCount(lib.item_count) })}`;
       }
     } catch (_) {
       // best-effort — the sync result box just below already shows what happened either way
@@ -409,13 +411,13 @@
     jobStarted();
     try {
       while (true) {
-        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours... (${totalProcessed} traité(s))</p>`;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.extracting', { count: totalProcessed }))}</p>`;
         if (onProgress) onProgress(totalProcessed, null);
         const res = await api('POST', `/api/libraries/${libId}/extract-missing?limit=5`);
         totalProcessed += res.processed;
         if (res.processed === 0 || res.remaining === 0) break;
       }
-      box.innerHTML = `<div class="invite-link-box">${totalProcessed} fiche(s) traitée(s). Terminé.</div>`;
+      box.innerHTML = `<div class="invite-link-box">${esc(t('admin.extraction_done', { count: totalProcessed }))}</div>`;
       return totalProcessed;
     } finally {
       jobEnded();
@@ -429,14 +431,14 @@
     jobStarted();
     try {
       while (total === null || offset < total) {
-        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours... (${offset}${total !== null ? ` / ${total}` : ''})</p>`;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.regenerating', { done: offset, total: total !== null ? ' / ' + total : '' }))}</p>`;
         if (onProgress) onProgress(offset, total);
         const res = await api('POST', `/api/libraries/${libId}/regenerate-covers?limit=5&offset=${offset}`);
         total = res.total;
         offset = res.offset;
         if (res.processed === 0) break; // safety net against an infinite loop if total is somehow never reached
       }
-      box.innerHTML = `<div class="invite-link-box">${offset} couverture(s) régénérée(s). Terminé.</div>`;
+      box.innerHTML = `<div class="invite-link-box">${esc(t('admin.regeneration_done', { count: offset }))}</div>`;
       return offset;
     } finally {
       jobEnded();
@@ -472,10 +474,10 @@
         allConflicted = allConflicted.concat(res.conflicted || []);
         lastRes = res;
         const done = res.added + (res.updated || 0) + res.unchanged;
-        box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours... ${done}/${res.total}</p>`;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.syncing', { done, total: res.total }))}</p>`;
         if (onProgress) onProgress(done, res.total);
         if (metaEl && libPath) {
-          metaEl.textContent = `libraries/${libPath} — synchronisation en cours — ${done}/${res.total} objets`;
+          metaEl.textContent = `libraries/${libPath} — ${t('admin.sync_in_progress_meta', { done, total: res.total })}`;
         }
         if (res.added === 0 && (res.updated || 0) === 0) break;
       }
@@ -502,8 +504,8 @@
 
   function updateJobGuards() {
     const running = activeJobCount > 0;
-    tabs.forEach((t) => { if (!t.classList.contains('active')) t.disabled = running; });
-    window.onbeforeunload = running ? () => 'Une synchronisation ou régénération est en cours — quitter la page l\u2019interrompra.' : null;
+    tabs.forEach((tb) => { if (!tb.classList.contains('active')) tb.disabled = running; });
+    window.onbeforeunload = running ? () => t('admin.leave_page_warning') : null;
   }
 
   /**
@@ -539,25 +541,25 @@
   function renderJobStatus(libId, job) {
     const box = document.getElementById(`sync-result-${libId}`);
     if (!box || !job) return;
-    const typeLabels = { sync: 'Synchronisation', 'extract-missing': 'Extraction des métadonnées', 'regenerate-covers': 'Régénération des miniatures' };
-    const label = typeLabels[job.job_type] || job.job_type;
+    const typeLabelKeys = { sync: 'admin.job_sync', 'extract-missing': 'admin.job_extract', 'regenerate-covers': 'admin.job_regenerate' };
+    const label = typeLabelKeys[job.job_type] ? t(typeLabelKeys[job.job_type]) : job.job_type;
     const progress = job.total ? `${job.done} / ${job.total}` : `${job.done}`;
     const ago = (Date.now() - new Date(job.updated_at).getTime()) / 1000;
     if (job.status === 'error') {
-      box.innerHTML = `<div class="invite-link-box" style="border-color:var(--color-danger);">${esc(label)} — échec à ${progress} : ${esc(job.message || '')}</div>`;
+      box.innerHTML = `<div class="invite-link-box" style="border-color:var(--color-danger);">${esc(t('admin.job_failed_at', { label, progress, message: job.message || '' }))}</div>`;
     } else if (job.status === 'done') {
-      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(label)} — terminé (${progress}), ${formatSyncDate(job.updated_at)}.</p>`;
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.job_finished', { label, progress, date: formatSyncDate(job.updated_at) }))}</p>`;
     } else if (ago < 20) {
       // Recently touched enough that a tab somewhere is plausibly still driving
       // it — shown as read-only progress rather than a Reprendre button, since
       // clicking one while a live loop is also running would race it.
-      const current = job.current_item ? ` — en cours : ${esc(job.current_item)}` : '';
-      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(label)} en cours... ${progress}${current}</p>`;
+      const current = job.current_item ? ' — ' + t('admin.job_current_item', { item: esc(job.current_item) }) : '';
+      box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.job_in_progress', { label, progress }))}${current}</p>`;
     } else {
       box.innerHTML = `
         <div class="invite-link-box">
-          ${esc(label)} en pause à ${progress} — aucune page n'a fait avancer ce lot depuis un moment.
-          <button type="button" class="btn btn-secondary btn-sm" data-resume-job="${libId}" data-resume-type="${esc(job.job_type)}" data-resume-done="${job.done}" style="margin-left:8px;">Reprendre</button>
+          ${esc(t('admin.job_paused', { label, progress }))}
+          <button type="button" class="btn btn-secondary btn-sm" data-resume-job="${libId}" data-resume-type="${esc(job.job_type)}" data-resume-done="${job.done}" style="margin-left:8px;">${esc(t('admin.resume'))}</button>
         </div>`;
       box.querySelector('[data-resume-job]').addEventListener('click', async (e) => {
         const btn = e.currentTarget;
@@ -581,57 +583,53 @@
 
   async function renderLibrariesTab() {
     const panel = panels.libraries;
-    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
       const [libraries, jobs] = await Promise.all([api('GET', '/api/libraries'), api('GET', '/api/library-jobs')]);
       panel.innerHTML = `
         <div class="admin-card">
           <div class="admin-card-head">
-            <h2>Bibliothèques (${libraries.length})</h2>
+            <h2>${esc(t('admin.libraries_heading', { count: libraries.length }))}</h2>
             <div class="admin-row-actions-group">
-              <button class="btn btn-secondary btn-sm" id="syncAllBtn" ${libraries.length ? '' : 'disabled'}>Tout synchroniser</button>
-              <button class="btn btn-secondary btn-sm" id="extractAllBtn" ${libraries.length ? '' : 'disabled'} title="Extraire les métadonnées et couvertures manquantes de toutes les bibliothèques, une par une">Tout extraire (métadonnées)</button>
-              <button class="btn btn-secondary btn-sm" id="regenerateAllBtn" ${libraries.length ? '' : 'disabled'} title="Re-générer toutes les couvertures de toutes les bibliothèques en miniatures, une par une">Tout régénérer (miniatures)</button>
+              <button class="btn btn-secondary btn-sm" id="syncAllBtn" ${libraries.length ? '' : 'disabled'}>${esc(t('admin.sync_all'))}</button>
+              <button class="btn btn-secondary btn-sm" id="extractAllBtn" ${libraries.length ? '' : 'disabled'} title="${esc(t('admin.extract_all_title'))}">${esc(t('admin.extract_all'))}</button>
+              <button class="btn btn-secondary btn-sm" id="regenerateAllBtn" ${libraries.length ? '' : 'disabled'} title="${esc(t('admin.regenerate_all_title'))}">${esc(t('admin.regenerate_all'))}</button>
             </div>
           </div>
           <div class="admin-list" id="libList"></div>
           <div id="syncAllResult"></div>
         </div>
         <div class="admin-card">
-          <h2>Fiches orphelines</h2>
+          <h2>${esc(t('admin.orphaned_items'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Des fiches qui ne rattachent plus à aucune bibliothèque — laissées derrière par une bibliothèque
-            supprimée avant que ce nettoyage soit automatique. Comme <code>items.path</code> est unique sur
-            toute la base, elles peuvent bloquer une synchro qui retrouve les mêmes fichiers sous une
-            bibliothèque recréée au même chemin (« fichier(s) ignoré(s) — déjà indexé(s) sous une autre
-            bibliothèque »).
+            ${t('admin.orphaned_items_hint')}
           </p>
-          <button type="button" class="btn btn-secondary btn-sm" id="previewOrphanedItemsBtn">Rechercher les fiches orphelines</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="previewOrphanedItemsBtn">${esc(t('admin.search_orphaned'))}</button>
           <div id="orphanedItemsResult" style="margin-top:10px;"></div>
         </div>
         <div class="admin-card">
-          <h2>Ajouter une bibliothèque</h2>
-          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Le chemin est relatif au dossier <code>libraries/</code> monté par <code>compose.yml</code>.</p>
+          <h2>${esc(t('admin.add_library'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${t('admin.add_library_hint')}</p>
           <form class="admin-form" id="libForm">
             <div class="admin-form-row">
               <div class="field">
-                <label for="libName">Nom</label>
+                <label for="libName">${esc(t('admin.name'))}</label>
                 <input class="input" id="libName" required placeholder="BD Franco-Belge" />
               </div>
               <div class="field">
-                <label for="libPath">Chemin (relatif)</label>
+                <label for="libPath">${esc(t('admin.relative_path'))}</label>
                 <div class="path-field">
                   <input class="input" id="libPath" required placeholder="bd-franco-belge" />
-                  <button type="button" class="btn btn-secondary btn-sm" id="libBrowseBtn">Parcourir...</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="libBrowseBtn">${esc(t('admin.browse'))}</button>
                 </div>
               </div>
               <div class="field">
-                <label for="libType">Type de contenu</label>
+                <label for="libType">${esc(t('admin.content_type'))}</label>
                 <select class="input" id="libType">${typeOptionsHtml('comic')}</select>
               </div>
             </div>
             <div>
-              <button type="submit" class="btn btn-primary">Ajouter</button>
+              <button type="submit" class="btn btn-primary">${esc(t('admin.add'))}</button>
             </div>
           </form>
         </div>
@@ -653,11 +651,11 @@
         const failures = [];
         try {
           for (const lib of libraries) {
-            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}...</p>`;
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.syncing_library', { name: lib.name }))}</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
             try {
               grandTotal += await syncLibrary(lib.id, libBox, lib.path, (done, total) => {
-                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Synchronisation en cours — ${esc(lib.name)}... ${done}${total ? ` / ${total}` : ''}</p>`;
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.syncing_library_progress', { name: lib.name, done, total: total ? ' / ' + total : '' }))}</p>`;
               });
             } catch (err) {
               // Same as extractAllBtn/regenerateAllBtn — one library's failure
@@ -665,8 +663,8 @@
               failures.push(`${lib.name} (${err.message})`);
             }
           }
-          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) ajoutée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
-          showToast(failures.length ? 'Synchronisation terminée avec des échecs — voir le détail.' : 'Synchronisation terminée.');
+          box.innerHTML = `<div class="invite-link-box">${esc(t('admin.sync_all_total', { count: grandTotal }))}${failures.length ? ' ' + esc(t('admin.failures_on', { list: failures.join(', ') })) : ' ' + esc(t('admin.done'))}</div>`;
+          showToast(failures.length ? t('admin.sync_done_with_failures') : t('admin.sync_done'));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -683,11 +681,11 @@
         const failures = [];
         try {
           for (const lib of libraries) {
-            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours — ${esc(lib.name)}...</p>`;
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.extracting_library', { name: lib.name }))}</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
             try {
               grandTotal += await extractMissingForLibrary(lib.id, libBox, (done) => {
-                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Extraction en cours — ${esc(lib.name)}... ${done} traité(s)</p>`;
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.extracting_library_progress', { name: lib.name, count: done }))}</p>`;
               });
             } catch (err) {
               // One library failing (a crashed batch, a transient error) must not
@@ -695,8 +693,8 @@
               failures.push(`${lib.name} (${err.message})`);
             }
           }
-          box.innerHTML = `<div class="invite-link-box">${grandTotal} fiche(s) traitée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
-          showToast(failures.length ? 'Extraction terminée avec des échecs — voir le détail.' : 'Extraction terminée pour toutes les bibliothèques.');
+          box.innerHTML = `<div class="invite-link-box">${esc(t('admin.extract_all_total', { count: grandTotal }))}${failures.length ? ' ' + esc(t('admin.failures_on', { list: failures.join(', ') })) : ' ' + esc(t('admin.done'))}</div>`;
+          showToast(failures.length ? t('admin.extract_done_with_failures') : t('admin.extract_done'));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -706,7 +704,7 @@
       });
 
       document.getElementById('regenerateAllBtn').addEventListener('click', async (e) => {
-        if (!confirm('Re-générer toutes les couvertures de toutes les bibliothèques en miniatures ? Ça peut prendre un long moment pour une grosse collection.')) return;
+        if (!confirm(t('admin.confirm_regenerate_all'))) return;
         const btn = e.currentTarget;
         const box = document.getElementById('syncAllResult');
         btn.disabled = true;
@@ -714,11 +712,11 @@
         const failures = [];
         try {
           for (const lib of libraries) {
-            box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours — ${esc(lib.name)}...</p>`;
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.regenerating_library', { name: lib.name }))}</p>`;
             const libBox = document.getElementById(`sync-result-${lib.id}`) || document.createElement('div');
             try {
               grandTotal += await regenerateCoversForLibrary(lib.id, libBox, 0, (done, total) => {
-                box.innerHTML = `<p class="text-muted" style="font-size:13px;">Régénération en cours — ${esc(lib.name)}... ${done}${total ? ` / ${total}` : ''}</p>`;
+                box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.regenerating_library_progress', { name: lib.name, done, total: total ? ' / ' + total : '' }))}</p>`;
               });
             } catch (err) {
               // Same as extractAllBtn above — one library's failure shouldn't stop
@@ -726,8 +724,8 @@
               failures.push(`${lib.name} (${err.message})`);
             }
           }
-          box.innerHTML = `<div class="invite-link-box">${grandTotal} couverture(s) régénérée(s) au total.${failures.length ? ` Échec sur : ${failures.map(esc).join(', ')}.` : ' Terminé.'}</div>`;
-          showToast(failures.length ? 'Régénération terminée avec des échecs — voir le détail.' : 'Régénération terminée pour toutes les bibliothèques.');
+          box.innerHTML = `<div class="invite-link-box">${esc(t('admin.regenerate_all_total', { count: grandTotal }))}${failures.length ? ' ' + esc(t('admin.failures_on', { list: failures.join(', ') })) : ' ' + esc(t('admin.done'))}</div>`;
+          showToast(failures.length ? t('admin.regenerate_done_with_failures') : t('admin.regenerate_done'));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -744,7 +742,7 @@
             path: document.getElementById('libPath').value.trim(),
             type: document.getElementById('libType').value,
           });
-          showToast('Bibliothèque ajoutée.');
+          showToast(t('admin.library_added'));
           renderLibrariesTab();
         } catch (err) {
           showToast(err.message, true);
@@ -753,26 +751,26 @@
 
       document.getElementById('previewOrphanedItemsBtn').addEventListener('click', async () => {
         const box = document.getElementById('orphanedItemsResult');
-        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Recherche...</p>';
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.searching'))}</p>`;
         try {
           const res = await api('GET', '/api/orphaned-items');
           if (!res.matches.length) {
-            box.innerHTML = '<p class="text-muted" style="font-size:13px;">Aucune fiche orpheline.</p>';
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.no_orphaned_item'))}</p>`;
             return;
           }
           box.innerHTML = `
-            <p style="font-size:13px;">${res.matches.length} fiche(s) orpheline(s) :</p>
+            <p style="font-size:13px;">${esc(t('admin.orphaned_items_found', { count: res.matches.length }))}</p>
             <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
               ${res.matches.map((m) => `<li>${esc(m.title)} <span class="text-muted">(${esc(m.path)})</span></li>`).join('')}
             </ul>
-            <button type="button" class="btn btn-danger btn-sm" id="confirmOrphanedItemsBtn">Supprimer ces ${res.matches.length} fiche(s)</button>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmOrphanedItemsBtn">${esc(t('admin.delete_n_items', { count: res.matches.length }))}</button>
           `;
           document.getElementById('confirmOrphanedItemsBtn').addEventListener('click', async () => {
-            if (!confirm(`Supprimer définitivement ces ${res.matches.length} fiche(s) orpheline(s) ?`)) return;
+            if (!confirm(t('admin.confirm_delete_orphaned', { count: res.matches.length }))) return;
             try {
               const delRes = await api('POST', '/api/orphaned-items');
-              box.innerHTML = `<div class="invite-link-box">${delRes.deleted} fiche(s) supprimée(s).</div>`;
-              showToast('Nettoyage effectué.');
+              box.innerHTML = `<div class="invite-link-box">${esc(t('admin.items_deleted', { count: delRes.deleted }))}</div>`;
+              showToast(t('admin.cleanup_done'));
             } catch (err) {
               showToast(err.message, true);
             }
@@ -783,14 +781,14 @@
         }
       });
     } catch (err) {
-      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
   }
 
   function renderLibList(libraries, jobs) {
     const list = document.getElementById('libList');
     if (!libraries.length) {
-      list.innerHTML = '<p class="text-muted">Aucune bibliothèque.</p>';
+      list.innerHTML = `<p class="text-muted">${esc(t('admin.no_library'))}</p>`;
       return;
     }
     list.innerHTML = libraries
@@ -799,20 +797,20 @@
       <div class="admin-row" id="lib-row-${l.id}">
         <div class="admin-row-main">
           <strong>${esc(l.name)}</strong>
-          <span id="lib-meta-${l.id}">libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)} — ${formatCount(l.item_count)} objet${l.item_count === 1 ? '' : 's'}</span>
+          <span id="lib-meta-${l.id}">libraries/${esc(l.path)} — ${formatSyncDate(l.last_synced_at)} — ${t('admin.item_count', { count: formatCount(l.item_count) })}</span>
         </div>
         <div class="admin-row-badges">
-          <span class="badge badge-reader">${TYPE_LABELS[l.type] || l.type}</span>
+          <span class="badge badge-reader">${TYPE_LABEL_KEYS[l.type] ? esc(t(TYPE_LABEL_KEYS[l.type])) : esc(l.type)}</span>
         </div>
         <div class="admin-row-actions">
           <div class="admin-row-actions-group">
-            <button class="btn btn-secondary btn-sm" data-sync-lib="${l.id}">Synchroniser</button>
-            <button class="btn btn-secondary btn-sm" data-extract-missing="${l.id}" title="Extraire les métadonnées et couvertures manquantes">Métadonnées manquantes</button>
-            <button class="btn btn-secondary btn-sm" data-regenerate-covers="${l.id}" title="Re-générer toutes les couvertures en miniatures (utile après l'activation de GD)">Régénérer les miniatures</button>
+            <button class="btn btn-secondary btn-sm" data-sync-lib="${l.id}">${esc(t('admin.sync'))}</button>
+            <button class="btn btn-secondary btn-sm" data-extract-missing="${l.id}" title="${esc(t('admin.extract_missing_title'))}">${esc(t('admin.missing_metadata'))}</button>
+            <button class="btn btn-secondary btn-sm" data-regenerate-covers="${l.id}" title="${esc(t('admin.regenerate_covers_title'))}">${esc(t('admin.regenerate_covers'))}</button>
           </div>
           <div class="admin-row-actions-group">
-            <button class="btn btn-secondary btn-sm" data-edit-lib="${l.id}">Modifier</button>
-            <button class="btn btn-danger btn-sm" data-delete-lib="${l.id}">Supprimer</button>
+            <button class="btn btn-secondary btn-sm" data-edit-lib="${l.id}">${esc(t('common.edit'))}</button>
+            <button class="btn btn-danger btn-sm" data-delete-lib="${l.id}">${esc(t('common.delete'))}</button>
           </div>
         </div>
         <div class="sync-result" id="sync-result-${l.id}"></div>
@@ -828,10 +826,10 @@
         const box = document.getElementById(`sync-result-${libId}`);
         const lib = libraries.find((l) => String(l.id) === String(libId));
         btn.disabled = true;
-        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Synchronisation en cours...</p>';
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.sync_in_progress'))}</p>`;
         try {
           const totalAdded = await syncLibrary(libId, box, lib ? lib.path : undefined);
-          showToast(`Synchronisation terminée : ${totalAdded} ajouté(s).`);
+          showToast(t('admin.sync_finished', { count: totalAdded }));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -848,7 +846,7 @@
         btn.disabled = true;
         try {
           const total = await extractMissingForLibrary(libId, box);
-          showToast(`Extraction terminée : ${total} fiche(s) traitée(s).`);
+          showToast(t('admin.extraction_finished', { count: total }));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -862,11 +860,11 @@
       btn.addEventListener('click', async () => {
         const libId = btn.dataset.regenerateCovers;
         const box = document.getElementById(`sync-result-${libId}`);
-        if (!confirm("Re-générer toutes les couvertures de cette bibliothèque en miniatures ? Ça peut prendre un moment pour une grosse bibliothèque.")) return;
+        if (!confirm(t('admin.confirm_regenerate_one'))) return;
         btn.disabled = true;
         try {
           const total = await regenerateCoversForLibrary(libId, box);
-          showToast(`Régénération terminée : ${total} couverture(s).`);
+          showToast(t('admin.regeneration_finished', { count: total }));
         } catch (err) {
           box.innerHTML = '';
           showToast(err.message, true);
@@ -884,23 +882,23 @@
           <div class="admin-row admin-row-edit" id="lib-row-${lib.id}">
             <form class="admin-form-row edit-lib-form" data-save-lib="${lib.id}" style="flex:1;align-items:flex-end;">
               <div class="field">
-                <label>Nom</label>
+                <label>${esc(t('admin.name'))}</label>
                 <input class="input" id="editLibName-${lib.id}" value="${esc(lib.name)}" required />
               </div>
               <div class="field">
-                <label>Chemin (relatif)</label>
+                <label>${esc(t('admin.relative_path'))}</label>
                 <div class="path-field">
                   <input class="input" id="editLibPath-${lib.id}" value="${esc(lib.path)}" required />
-                  <button type="button" class="btn btn-secondary btn-sm" id="editLibBrowse-${lib.id}">Parcourir...</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="editLibBrowse-${lib.id}">${esc(t('admin.browse'))}</button>
                 </div>
               </div>
               <div class="field">
-                <label>Type de contenu</label>
+                <label>${esc(t('admin.content_type'))}</label>
                 <select class="input" id="editLibType-${lib.id}">${typeOptionsHtml(lib.type)}</select>
               </div>
               <div style="display:flex;gap:6px;">
-                <button type="submit" class="btn btn-primary btn-sm">Enregistrer</button>
-                <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit="${lib.id}">Annuler</button>
+                <button type="submit" class="btn btn-primary btn-sm">${esc(t('common.save'))}</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-cancel-edit="${lib.id}">${esc(t('common.cancel'))}</button>
               </div>
             </form>
           </div>`;
@@ -920,7 +918,7 @@
               path: document.getElementById(`editLibPath-${lib.id}`).value.trim(),
               type: document.getElementById(`editLibType-${lib.id}`).value,
             });
-            showToast('Bibliothèque mise à jour.');
+            showToast(t('admin.library_updated'));
             renderLibrariesTab();
           } catch (err) {
             showToast(err.message, true);
@@ -930,10 +928,10 @@
     });
     list.querySelectorAll('[data-delete-lib]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Supprimer cette bibliothèque ? Les fiches déjà indexées ne seront pas supprimées, mais ne seront plus rattachées à elle.')) return;
+        if (!confirm(t('admin.confirm_delete_library'))) return;
         try {
           await api('DELETE', `/api/libraries/${btn.dataset.deleteLib}`);
-          showToast('Bibliothèque supprimée.');
+          showToast(t('admin.library_deleted'));
           renderLibrariesTab();
         } catch (err) {
           showToast(err.message, true);
@@ -947,7 +945,7 @@
       .map(
         (o) => `<div class="orphan-row">
           <span>${esc(o.title)} <span class="text-muted">(${esc(o.path)})</span></span>
-          <button class="btn btn-danger btn-sm" data-delete-orphan="${o.id}">Supprimer</button>
+          <button class="btn btn-danger btn-sm" data-delete-orphan="${o.id}">${esc(t('common.delete'))}</button>
         </div>`
       )
       .join('');
@@ -955,13 +953,13 @@
     const conflictRows = conflicted.map((p) => `<div class="orphan-row"><span>${esc(p)}</span></div>`).join('');
     box.innerHTML = `
       <div class="invite-link-box">
-        ${res.added} ajouté(s), ${res.updated || 0} modifié(s) sur le disque, ${res.unchanged} inchangé(s)${res.orphaned.length ? `, ${res.orphaned.length} fichier(s) introuvable(s) :` : '.'}
+        ${t('admin.sync_result_summary', { added: res.added, updated: res.updated || 0, unchanged: res.unchanged, orphaned: res.orphaned.length ? ', ' + t('admin.files_not_found', { count: res.orphaned.length }) : '.' })}
         ${orphanRows}
       </div>
       ${
         conflicted.length
           ? `<div class="invite-link-box" style="border-color:var(--color-danger);">
-              ${conflicted.length} fichier(s) ignoré(s) — déjà indexé(s) sous une autre bibliothèque (chemin en doublon) :
+              ${esc(t('admin.files_skipped_duplicate', { count: conflicted.length }))}
               ${conflictRows}
             </div>`
           : ''
@@ -971,7 +969,7 @@
         try {
           await api('DELETE', `/api/items/${btn.dataset.deleteOrphan}`);
           btn.closest('.orphan-row').remove();
-          showToast('Fiche supprimée.');
+          showToast(t('admin.item_deleted'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -984,149 +982,144 @@
   // ============================================================
   async function renderSettingsTab() {
     const panel = panels.settings;
-    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
       const s = await api('GET', '/api/settings');
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>Miniatures</h2>
+          <h2>${esc(t('settings.thumbnails'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Taille des miniatures affichées dans les grilles — couvertures des objets et vignettes
-            <code>folder.jpg</code> des grilles éditeur/collection, sur la page utilisateur comme ici dans
-            l'admin. La hauteur suit toujours automatiquement, au ratio 25:36. ${
-              s.gd_available
-                ? "Ne change que les miniatures générées à partir de maintenant : une nouvelle synchronisation en tient compte automatiquement, mais les couvertures déjà extraites ont besoin d'un clic sur « Régénérer les miniatures » (onglet Bibliothèques) pour être reprises à la nouvelle taille."
-                : "GD n'est pas disponible sur ce serveur (voir l'onglet Système) — les couvertures sont servies à leur résolution d'origine tant que ça n'est pas résolu ; ce réglage sera pris en compte dès que GD sera actif."
-            }
+            ${t('settings.thumbnails_hint')} ${s.gd_available ? t('settings.thumbnails_gd_available') : t('settings.thumbnails_gd_unavailable')}
           </p>
           <div class="field">
-            <label for="thumbnailWidthSlider">Largeur des miniatures — <span id="thumbnailSizeLabel">${s.thumbnail_width} × ${s.thumbnail_height} px</span></label>
+            <label for="thumbnailWidthSlider">${esc(t('settings.thumbnail_width'))} — <span id="thumbnailSizeLabel">${s.thumbnail_width} × ${s.thumbnail_height} px</span></label>
             <input id="thumbnailWidthSlider" type="range" min="50" max="300" step="5" value="${esc(s.thumbnail_width)}" style="width:100%;max-width:320px;" />
           </div>
           <div>
-            <button type="button" class="btn btn-primary" id="saveThumbnailSizeBtn" style="margin-top:var(--space-3);">Enregistrer</button>
+            <button type="button" class="btn btn-primary" id="saveThumbnailSizeBtn" style="margin-top:var(--space-3);">${esc(t('common.save'))}</button>
           </div>
         </div>
         <div class="admin-card">
-          <h2>Densité des grilles</h2>
+          <h2>${esc(t('settings.grid_density'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            La page de navigation classique et les grilles éditeur/collection tiennent sur un nombre de
-            colonnes fixe, centrées, et paginent au-delà du total défini ci-dessous.
+            ${t('settings.grid_density_hint')}
           </p>
           <div class="admin-form-row">
             <div class="field" style="flex:0 0 auto;">
-              <label for="gridColumns">Colonnes</label>
+              <label for="gridColumns">${esc(t('settings.columns'))}</label>
               <input class="input" id="gridColumns" type="number" min="1" max="15" value="${esc(s.grid_columns)}" style="width:100px;" />
             </div>
             <div class="field" style="flex:0 0 auto;">
-              <label for="gridPageSize">Objets max par page</label>
+              <label for="gridPageSize">${esc(t('settings.max_items_per_page'))}</label>
               <input class="input" id="gridPageSize" type="number" min="1" max="300" value="${esc(s.grid_page_size)}" style="width:100px;" />
             </div>
             <div style="margin-left:auto;">
-              <button type="button" class="btn btn-primary" id="saveGridDensityBtn">Enregistrer</button>
+              <button type="button" class="btn btn-primary" id="saveGridDensityBtn">${esc(t('common.save'))}</button>
             </div>
           </div>
         </div>
         <div class="admin-card">
-          <h2>Étagères de la page d'accueil</h2>
+          <h2>${esc(t('settings.home_shelves'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Les rangées « Bandes Dessinées récentes », « Ebooks récents »... de la page d'accueil. « Objets
-            chargés » définit combien d'objets récents sont récupérés au total (le maximum atteignable en
-            faisant défiler) ; « Colonnes visibles » et « Rangées visibles » définissent combien de ces objets
-            s'affichent avant qu'il faille faire défiler horizontalement pour voir les suivants.
+            ${t('settings.home_shelves_hint')}
           </p>
           <div class="admin-form-row">
             <div class="field" style="flex:0 0 auto;">
-              <label for="homeShelfFetchLimit">Objets chargés</label>
+              <label for="homeShelfFetchLimit">${esc(t('settings.loaded_items'))}</label>
               <input class="input" id="homeShelfFetchLimit" type="number" min="40" max="120" value="${esc(s.home_shelf_fetch_limit)}" style="width:100px;" />
             </div>
             <div class="field" style="flex:0 0 auto;">
-              <label for="homeShelfColumns">Colonnes visibles</label>
+              <label for="homeShelfColumns">${esc(t('settings.visible_columns'))}</label>
               <input class="input" id="homeShelfColumns" type="number" min="1" max="15" value="${esc(s.home_shelf_columns)}" style="width:100px;" />
             </div>
             <div class="field" style="flex:0 0 auto;">
-              <label for="homeShelfRows">Rangées visibles</label>
+              <label for="homeShelfRows">${esc(t('settings.visible_rows'))}</label>
               <input class="input" id="homeShelfRows" type="number" min="1" max="5" value="${esc(s.home_shelf_rows)}" style="width:100px;" />
             </div>
             <div style="margin-left:auto;">
-              <button type="button" class="btn btn-primary" id="saveHomeShelfBtn">Enregistrer</button>
+              <button type="button" class="btn btn-primary" id="saveHomeShelfBtn">${esc(t('common.save'))}</button>
             </div>
           </div>
         </div>
         <div class="admin-card">
-          <h2>Navigation par éditeur</h2>
+          <h2>${esc(t('settings.publisher_nav'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Pour une bibliothèque rangée en <code>Éditeur/Collection/Tome...</code>, ajoute une flèche à côté
-            de l'onglet correspondant. Elle ouvre d'abord les bibliothèques de ce type (une tuile par bibliothèque,
-            sautée directement s'il n'y en a qu'une), puis les éditeurs de la bibliothèque choisie, puis ses
-            collections — avec, à côté des collections, les tomes posés directement dans le dossier de l'éditeur.
-            Le nom de l'éditeur/de la collection est déduit du nom des dossiers ; leur vignette utilise
-            <code>folder.jpg</code> si présent dans le dossier (sinon la couverture du premier objet trouvé).
+            ${t('settings.publisher_nav_hint')}
           </p>
           <label class="mfa-force-toggle">
             <input type="checkbox" id="showPublishersToggle" ${s.show_publishers ? 'checked' : ''} />
-            Afficher la navigation par éditeur
+            ${esc(t('settings.show_publisher_nav'))}
           </label>
           <label class="mfa-force-toggle">
             <input type="checkbox" id="showEmptyLibrariesNavToggle" ${s.show_empty_libraries_nav ? 'checked' : ''} />
-            Afficher aussi les bibliothèques sans structure éditeur/collection dans cette liste
+            ${esc(t('settings.show_empty_libraries'))}
           </label>
         </div>
         <div class="admin-card">
-          <h2>Filtre de synchronisation</h2>
+          <h2>${esc(t('settings.sync_filter'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Expression régulière (PCRE) appliquée au nom de chaque fichier/dossier pendant une synchronisation —
-            une correspondance veut dire "ignorer, ce n'est pas du contenu". Les fichiers macOS <code>._*</code>
-            et <code>.DS_Store</code> sont déjà ignorés automatiquement, pas besoin de les ajouter ici.
-            Par défaut, exclut les fichiers d'accompagnement d'Ubooquity (<code>folder.jpg</code>, <code>header.jpg</code>,
-            <code>folder.css</code>, <code>folder-info.html</code>).
+            ${t('settings.sync_filter_hint')}
           </p>
           <form class="admin-form" id="excludeForm">
             <div class="field">
-              <label for="excludePattern">Motif d'exclusion</label>
+              <label for="excludePattern">${esc(t('settings.exclude_pattern'))}</label>
               <input class="input" id="excludePattern" style="font-family:monospace;" value="${esc(s.scan_exclude_pattern)}" />
             </div>
             <div>
-              <button type="submit" class="btn btn-primary">Enregistrer</button>
+              <button type="submit" class="btn btn-primary">${esc(t('common.save'))}</button>
             </div>
           </form>
           <div class="field" style="margin-top:16px;">
-            <label for="excludeTest">Tester un nom de fichier</label>
+            <label for="excludeTest">${esc(t('settings.test_filename'))}</label>
             <input class="input" id="excludeTest" placeholder="folder.jpg" />
             <p class="text-muted" id="excludeTestResult" style="font-size:13px;margin:8px 0 0;"></p>
           </div>
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-divider);">
-            <button type="button" class="btn btn-secondary btn-sm" id="previewCleanupBtn">Prévisualiser les fiches déjà scannées à tort</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="previewCleanupBtn">${esc(t('settings.preview_wrongly_scanned'))}</button>
             <div id="cleanupResult" style="margin-top:10px;"></div>
           </div>
         </div>
         <div class="admin-card">
-          <h2>Synchronisation planifiée</h2>
+          <h2>${esc(t('settings.allowed_formats'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            La synchronisation se déclenche manuellement (onglet Bibliothèques) ou depuis l'extérieur —
-            une tâche planifiée sur ta box/NAS (cron) qui appelle ces adresses avec le jeton ci-dessous,
-            sans avoir besoin d'une session admin ouverte.
+            ${t('settings.allowed_formats_hint')}
+          </p>
+          <table class="admin-table" style="margin-bottom:14px;">
+            <tbody>
+              <tr><td>${esc(t('type.comic'))}</td><td>CBZ, CBR, PDF, EPUB</td></tr>
+              <tr><td>${esc(t('type.ebook'))}</td><td>PDF, EPUB</td></tr>
+              <tr><td>${esc(t('type.magazine'))}</td><td>PDF</td></tr>
+              <tr><td>${esc(t('type.other'))}</td><td>JPG, PNG, BMP, HEIC, TIFF</td></tr>
+            </tbody>
+          </table>
+          <button type="button" class="btn btn-secondary btn-sm" id="previewWrongFormatBtn">${esc(t('settings.preview_wrong_format'))}</button>
+          <div id="wrongFormatResult" style="margin-top:10px;"></div>
+        </div>
+        <div class="admin-card">
+          <h2>${esc(t('settings.scheduled_sync'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            ${t('settings.scheduled_sync_hint')}
           </p>
           <div class="field">
-            <label>Jeton de synchronisation</label>
+            <label>${esc(t('settings.sync_token'))}</label>
             <div class="path-field">
               <input class="input" id="syncTokenField" value="${esc(s.sync_token)}" readonly onclick="this.select()" style="font-family:monospace;" />
-              <button type="button" class="btn btn-secondary btn-sm" id="regenTokenBtn">Régénérer</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="regenTokenBtn">${esc(t('settings.regenerate_token'))}</button>
             </div>
           </div>
           <div class="field">
-            <label>Exemple — tout synchroniser chaque nuit à 3h (crontab de l'hôte)</label>
+            <label>${esc(t('settings.crontab_example'))}</label>
             <textarea class="input" readonly rows="2" style="font-family:monospace;font-size:12px;" onclick="this.select()">0 3 * * * curl -s -X POST ${esc(s.site_url)}/api/sync-all -H "X-Sync-Token: ${esc(s.sync_token)}"</textarea>
           </div>
         </div>
       `;
 
       document.getElementById('regenTokenBtn').addEventListener('click', async () => {
-        if (!confirm("Régénérer le jeton ? L'ancien cessera immédiatement de fonctionner — pense à mettre à jour ta tâche planifiée.")) return;
+        if (!confirm(t('settings.confirm_regen_token'))) return;
         try {
           const res = await api('POST', '/api/settings/regenerate-sync-token');
           document.getElementById('syncTokenField').value = res.sync_token;
-          showToast('Jeton régénéré.');
+          showToast(t('settings.token_regenerated'));
           renderSettingsTab();
         } catch (err) {
           showToast(err.message, true);
@@ -1143,7 +1136,7 @@
         const width = Number(document.getElementById('thumbnailWidthSlider').value);
         try {
           await api('PUT', '/api/settings', { thumbnail_width: width });
-          showToast('Enregistré.');
+          showToast(t('common.saved'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -1153,16 +1146,16 @@
         const gridColumns = Number(document.getElementById('gridColumns').value);
         const gridSize = Number(document.getElementById('gridPageSize').value);
         if (!gridColumns || gridColumns < 1 || gridColumns > 15) {
-          showToast('Le nombre de colonnes doit être compris entre 1 et 15.', true);
+          showToast(t('settings.err_columns_range'), true);
           return;
         }
         if (!gridSize || gridSize < 1 || gridSize > 300) {
-          showToast('Le nombre d\u2019objets par page doit être compris entre 1 et 300.', true);
+          showToast(t('settings.err_page_size_range'), true);
           return;
         }
         try {
           await api('PUT', '/api/settings', { grid_columns: gridColumns, grid_page_size: gridSize });
-          showToast('Enregistré.');
+          showToast(t('common.saved'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -1173,15 +1166,15 @@
         const shelfColumns = Number(document.getElementById('homeShelfColumns').value);
         const shelfRows = Number(document.getElementById('homeShelfRows').value);
         if (!fetchLimit || fetchLimit < 40 || fetchLimit > 120) {
-          showToast('Le nombre d\u2019objets chargés doit être compris entre 40 et 120.', true);
+          showToast(t('settings.err_loaded_items_range'), true);
           return;
         }
         if (!shelfColumns || shelfColumns < 1 || shelfColumns > 15) {
-          showToast('Le nombre de colonnes visibles doit être compris entre 1 et 15.', true);
+          showToast(t('settings.err_visible_columns_range'), true);
           return;
         }
         if (!shelfRows || shelfRows < 1 || shelfRows > 5) {
-          showToast('Le nombre de rangées visibles doit être compris entre 1 et 5.', true);
+          showToast(t('settings.err_visible_rows_range'), true);
           return;
         }
         try {
@@ -1190,7 +1183,7 @@
             home_shelf_columns: shelfColumns,
             home_shelf_rows: shelfRows,
           });
-          showToast('Enregistré.');
+          showToast(t('common.saved'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -1199,7 +1192,7 @@
       document.getElementById('showPublishersToggle').addEventListener('change', async (e) => {
         try {
           await api('PUT', '/api/settings', { show_publishers: e.target.checked });
-          showToast('Enregistré.');
+          showToast(t('common.saved'));
         } catch (err) {
           e.target.checked = !e.target.checked;
           showToast(err.message, true);
@@ -1208,7 +1201,7 @@
       document.getElementById('showEmptyLibrariesNavToggle').addEventListener('change', async (e) => {
         try {
           await api('PUT', '/api/settings', { show_empty_libraries_nav: e.target.checked });
-          showToast('Enregistré.');
+          showToast(t('common.saved'));
         } catch (err) {
           e.target.checked = !e.target.checked;
           showToast(err.message, true);
@@ -1219,7 +1212,7 @@
         e.preventDefault();
         try {
           await api('PUT', '/api/settings', { scan_exclude_pattern: document.getElementById('excludePattern').value });
-          showToast('Motif enregistré.');
+          showToast(t('settings.pattern_saved'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -1240,36 +1233,68 @@
               pattern: document.getElementById('excludePattern').value,
               filename,
             });
-            resultEl.textContent = res.matches ? '✓ Correspond — serait ignoré au scan.' : '✗ Ne correspond pas — serait indexé normalement.';
+            resultEl.textContent = res.matches ? '✓ ' + t('settings.pattern_matches') : '✗ ' + t('settings.pattern_no_match');
             resultEl.style.color = res.matches ? '#7be3ab' : '';
           } catch (err) {
-            resultEl.textContent = 'Erreur : ' + err.message;
+            resultEl.textContent = t('common.error') + ' : ' + err.message;
           }
         }, 300);
       });
 
       document.getElementById('previewCleanupBtn').addEventListener('click', async () => {
         const box = document.getElementById('cleanupResult');
-        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Recherche...</p>';
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.searching'))}</p>`;
         try {
           const res = await api('GET', '/api/cleanup-excluded');
           if (!res.matches.length) {
-            box.innerHTML = '<p class="text-muted" style="font-size:13px;">Aucune fiche ne correspond au motif actuel.</p>';
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('settings.no_match_current_pattern'))}</p>`;
             return;
           }
           box.innerHTML = `
-            <p style="font-size:13px;">${res.matches.length} fiche(s) correspondent au motif actuel :</p>
+            <p style="font-size:13px;">${esc(t('settings.items_match_pattern', { count: res.matches.length }))}</p>
             <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
               ${res.matches.map((m) => `<li>${esc(m.title)} <span class="text-muted">(${esc(m.path)})</span></li>`).join('')}
             </ul>
-            <button type="button" class="btn btn-danger btn-sm" id="confirmCleanupBtn">Supprimer ces ${res.matches.length} fiche(s)</button>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmCleanupBtn">${esc(t('admin.delete_n_items', { count: res.matches.length }))}</button>
           `;
           document.getElementById('confirmCleanupBtn').addEventListener('click', async () => {
-            if (!confirm(`Supprimer définitivement ces ${res.matches.length} fiche(s) ?`)) return;
+            if (!confirm(t('settings.confirm_delete_matching', { count: res.matches.length }))) return;
             try {
               const delRes = await api('POST', '/api/cleanup-excluded');
-              box.innerHTML = `<div class="invite-link-box">${delRes.deleted} fiche(s) supprimée(s).</div>`;
-              showToast('Nettoyage effectué.');
+              box.innerHTML = `<div class="invite-link-box">${esc(t('admin.items_deleted', { count: delRes.deleted }))}</div>`;
+              showToast(t('admin.cleanup_done'));
+            } catch (err) {
+              showToast(err.message, true);
+            }
+          });
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        }
+      });
+
+      document.getElementById('previewWrongFormatBtn').addEventListener('click', async () => {
+        const box = document.getElementById('wrongFormatResult');
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.searching'))}</p>`;
+        try {
+          const res = await api('GET', '/api/cleanup-wrong-format');
+          if (!res.matches.length) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('settings.no_wrong_format_item'))}</p>`;
+            return;
+          }
+          box.innerHTML = `
+            <p style="font-size:13px;">${esc(t('settings.wrong_format_items_found', { count: res.matches.length }))}</p>
+            <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
+              ${res.matches.map((m) => `<li>${esc(m.title)} — <span class="text-muted">${esc(m.library_name)} (${esc(m.format)}) — ${esc(m.path)}</span></li>`).join('')}
+            </ul>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmWrongFormatBtn">${esc(t('admin.delete_n_items', { count: res.matches.length }))}</button>
+          `;
+          document.getElementById('confirmWrongFormatBtn').addEventListener('click', async () => {
+            if (!confirm(t('settings.confirm_delete_wrong_format', { count: res.matches.length }))) return;
+            try {
+              const delRes = await api('POST', '/api/cleanup-wrong-format');
+              box.innerHTML = `<div class="invite-link-box">${esc(t('admin.items_deleted', { count: delRes.deleted }))}</div>`;
+              showToast(t('admin.cleanup_done'));
             } catch (err) {
               showToast(err.message, true);
             }
@@ -1280,7 +1305,7 @@
         }
       });
     } catch (err) {
-      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
   }
 
@@ -1289,7 +1314,7 @@
   // ============================================================
   async function renderMaintenanceTab() {
     const panel = panels.maintenance;
-    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
       const [s, templates] = await Promise.all([
         api('GET', '/api/settings'),
@@ -1297,108 +1322,102 @@
       ]);
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>Sauvegarde</h2>
+          <h2>${esc(t('maintenance.backup'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Un instantané complet et cohérent de la base de données (métadonnées, tags, progression de lecture,
-            réglages) — pas les fichiers des bibliothèques eux-mêmes, ni les couvertures/miniatures. À faire
-            régulièrement, surtout avant une manipulation risquée (suppression massive, changement de chemin
-            d'une bibliothèque).
+            ${t('maintenance.backup_hint')}
           </p>
-          <a class="btn btn-primary" href="/api/backup" download>Télécharger une sauvegarde</a>
+          <a class="btn btn-primary" href="/api/backup" download>${esc(t('maintenance.download_backup'))}</a>
         </div>
         <div class="admin-card">
-          <h2>Envoi d'e-mails (SMTP)</h2>
-          <p class="text-muted" style="font-size:13px;margin-top:-6px;">Nécessaire pour envoyer les liens d'invitation. Utilise un relais existant (Gmail, ton hébergeur, ...) — un conteneur n'a pas de serveur mail local fonctionnel.</p>
+          <h2>${esc(t('maintenance.smtp'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('maintenance.smtp_hint'))}</p>
           <form class="admin-form" id="smtpForm">
             <div class="admin-form-row">
               <div class="field">
-                <label for="smtpHost">Serveur SMTP</label>
+                <label for="smtpHost">${esc(t('maintenance.smtp_server'))}</label>
                 <input class="input" id="smtpHost" value="${esc(s.smtp_host || '')}" placeholder="smtp.gmail.com" />
               </div>
               <div class="field">
-                <label for="smtpPort">Port</label>
+                <label for="smtpPort">${esc(t('maintenance.port'))}</label>
                 <input class="input" id="smtpPort" value="${esc(s.smtp_port || '587')}" />
               </div>
               <div class="field">
-                <label for="smtpEncryption">Chiffrement</label>
+                <label for="smtpEncryption">${esc(t('maintenance.encryption'))}</label>
                 <select class="input" id="smtpEncryption">
                   <option value="starttls" ${s.smtp_encryption === 'starttls' ? 'selected' : ''}>STARTTLS</option>
-                  <option value="ssl" ${s.smtp_encryption === 'ssl' ? 'selected' : ''}>SSL/TLS implicite</option>
-                  <option value="none" ${s.smtp_encryption === 'none' ? 'selected' : ''}>Aucun</option>
+                  <option value="ssl" ${s.smtp_encryption === 'ssl' ? 'selected' : ''}>${esc(t('maintenance.implicit_ssl'))}</option>
+                  <option value="none" ${s.smtp_encryption === 'none' ? 'selected' : ''}>${esc(t('maintenance.none'))}</option>
                 </select>
               </div>
             </div>
             <div class="admin-form-row">
               <div class="field">
-                <label for="smtpUsername">Utilisateur SMTP</label>
+                <label for="smtpUsername">${esc(t('maintenance.smtp_user'))}</label>
                 <input class="input" id="smtpUsername" value="${esc(s.smtp_username || '')}" />
               </div>
               <div class="field">
-                <label for="smtpPassword">Mot de passe SMTP</label>
-                <input class="input" id="smtpPassword" type="password" placeholder="${s.smtp_password_set ? '•••••••• (laisser vide pour conserver)' : ''}" />
+                <label for="smtpPassword">${esc(t('maintenance.smtp_password'))}</label>
+                <input class="input" id="smtpPassword" type="password" placeholder="${s.smtp_password_set ? esc(t('maintenance.password_set_placeholder')) : ''}" />
               </div>
             </div>
             <div class="admin-form-row">
               <div class="field">
-                <label for="smtpFromEmail">Adresse d'expédition</label>
+                <label for="smtpFromEmail">${esc(t('maintenance.from_address'))}</label>
                 <input class="input" id="smtpFromEmail" type="email" value="${esc(s.smtp_from_email || '')}" placeholder="codex@example.com" />
               </div>
               <div class="field">
-                <label for="smtpFromName">Nom d'expéditeur</label>
+                <label for="smtpFromName">${esc(t('maintenance.from_name'))}</label>
                 <input class="input" id="smtpFromName" value="${esc(s.smtp_from_name || 'Codex')}" />
               </div>
             </div>
             <div class="field">
-              <label for="siteUrl">Adresse du site (pour les liens d'invitation)</label>
+              <label for="siteUrl">${esc(t('maintenance.site_url'))}</label>
               <input class="input" id="siteUrl" value="${esc(s.site_url || '')}" />
             </div>
             <div>
-              <button type="submit" class="btn btn-primary">Enregistrer</button>
+              <button type="submit" class="btn btn-primary">${esc(t('common.save'))}</button>
             </div>
           </form>
         </div>
         <div class="admin-card">
-          <h2>Modèles d'e-mails</h2>
+          <h2>${esc(t('maintenance.email_templates'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Le texte envoyé pour chaque type de message ci-dessous. <code>{...}</code> marque un emplacement
-            rempli automatiquement au moment de l'envoi — vois la liste sous chaque champ. Un nouveau modèle
-            démarre avec le texte standard ; le modifier ne touche que ce modèle-là, les autres restent
-            inchangés.
+            ${t('maintenance.email_templates_hint')}
           </p>
           <div class="field">
-            <label for="templateSelect">Modèle</label>
+            <label for="templateSelect">${esc(t('maintenance.template'))}</label>
             <select class="input" id="templateSelect">
-              ${Object.entries(templates).map(([key, t]) => `<option value="${esc(key)}">${esc(t.label)}</option>`).join('')}
+              ${Object.entries(templates).map(([key, tpl]) => `<option value="${esc(key)}">${esc(tpl.label)}</option>`).join('')}
             </select>
           </div>
           <form class="admin-form" id="templateForm">
             <div class="field">
-              <label for="templateSubject">Objet</label>
+              <label for="templateSubject">${esc(t('maintenance.subject'))}</label>
               <input class="input" id="templateSubject" required />
             </div>
             <div class="field">
-              <label for="templateBody">Message</label>
+              <label for="templateBody">${esc(t('maintenance.message'))}</label>
               <textarea class="input" id="templateBody" rows="8" required></textarea>
               <p class="text-muted" id="templatePlaceholders" style="font-size:12.5px;margin-top:6px;"></p>
             </div>
             <div style="display:flex;gap:8px;">
-              <button type="submit" class="btn btn-primary">Enregistrer ce modèle</button>
-              <button type="button" class="btn btn-ghost" id="templateResetBtn">Restaurer le texte standard</button>
+              <button type="submit" class="btn btn-primary">${esc(t('maintenance.save_template'))}</button>
+              <button type="button" class="btn btn-ghost" id="templateResetBtn">${esc(t('maintenance.restore_default'))}</button>
             </div>
             <div id="templateResult"></div>
           </form>
         </div>
         <div class="admin-card">
-          <h2>Tester l'envoi</h2>
+          <h2>${esc(t('maintenance.test_sending'))}</h2>
           <form class="admin-form" id="testForm">
             <div class="admin-form-row">
               <div class="field">
-                <label for="testEmail">Envoyer un e-mail de test à</label>
+                <label for="testEmail">${esc(t('maintenance.send_test_to'))}</label>
                 <input class="input" id="testEmail" type="email" required />
               </div>
             </div>
             <div>
-              <button type="submit" class="btn btn-secondary">Envoyer le test</button>
+              <button type="submit" class="btn btn-secondary">${esc(t('maintenance.send_test'))}</button>
             </div>
             <div id="testResult"></div>
           </form>
@@ -1406,11 +1425,11 @@
       `;
 
       function loadTemplateIntoForm(key) {
-        const t = templates[key];
-        document.getElementById('templateSubject').value = t.subject;
-        document.getElementById('templateBody').value = t.body;
-        document.getElementById('templatePlaceholders').textContent = t.placeholders.length
-          ? `Emplacements disponibles : ${t.placeholders.map((p) => `{${p}}`).join(', ')}`
+        const tpl = templates[key];
+        document.getElementById('templateSubject').value = tpl.subject;
+        document.getElementById('templateBody').value = tpl.body;
+        document.getElementById('templatePlaceholders').textContent = tpl.placeholders.length
+          ? t('maintenance.available_placeholders', { list: tpl.placeholders.map((p) => `{${p}}`).join(', ') })
           : '';
         document.getElementById('templateResult').innerHTML = '';
       }
@@ -1431,7 +1450,7 @@
           });
           templates[key].subject = document.getElementById('templateSubject').value;
           templates[key].body = document.getElementById('templateBody').value;
-          box.innerHTML = '<p class="account-success" style="font-size:13px;">Modèle enregistré.</p>';
+          box.innerHTML = `<p class="account-success" style="font-size:13px;">${esc(t('maintenance.template_saved'))}</p>`;
         } catch (err) {
           box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
         }
@@ -1439,14 +1458,14 @@
 
       document.getElementById('templateResetBtn').addEventListener('click', async () => {
         const key = templateSelect.value;
-        if (!confirm(`Restaurer le texte standard pour « ${templates[key].label} » ? Le texte personnalisé actuel sera perdu.`)) return;
+        if (!confirm(t('maintenance.confirm_restore_default', { label: templates[key].label }))) return;
         const box = document.getElementById('templateResult');
         try {
           await api('POST', '/api/email-templates-reset', { key });
           const fresh = await api('GET', '/api/email-templates');
           templates[key] = fresh[key];
           loadTemplateIntoForm(key);
-          box.innerHTML = '<p class="account-success" style="font-size:13px;">Texte standard restauré.</p>';
+          box.innerHTML = `<p class="account-success" style="font-size:13px;">${esc(t('maintenance.default_restored'))}</p>`;
         } catch (err) {
           box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
         }
@@ -1465,7 +1484,7 @@
             smtp_from_name: document.getElementById('smtpFromName').value.trim(),
             site_url: document.getElementById('siteUrl').value.trim(),
           });
-          showToast('Réglages enregistrés.');
+          showToast(t('maintenance.settings_saved'));
         } catch (err) {
           showToast(err.message, true);
         }
@@ -1474,16 +1493,16 @@
       document.getElementById('testForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const box = document.getElementById('testResult');
-        box.innerHTML = '<p class="text-muted" style="font-size:13px;">Envoi...</p>';
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('account.sending'))}</p>`;
         try {
           const res = await api('POST', '/api/settings/test-email', { to: document.getElementById('testEmail').value.trim() });
-          box.innerHTML = `<div class="invite-link-box"><span class="status ${res.sent ? 'status-ok' : 'status-fail'}">${res.sent ? '✓ Envoyé.' : '⚠ ' + esc(res.error || 'Échec')}</span></div>`;
+          box.innerHTML = `<div class="invite-link-box"><span class="status ${res.sent ? 'status-ok' : 'status-fail'}">${res.sent ? '✓ ' + esc(t('maintenance.sent')) : '⚠ ' + esc(res.error || t('maintenance.failed'))}</span></div>`;
         } catch (err) {
           box.innerHTML = `<div class="invite-link-box"><span class="status status-fail">⚠ ${esc(err.message)}</span></div>`;
         }
       });
     } catch (err) {
-      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
   }
 
@@ -1494,7 +1513,7 @@
   // ============================================================
   async function renderSystemTab() {
     const panel = panels.system;
-    panel.innerHTML = '<p class="text-muted">Chargement...</p>';
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
       const [status, attempts] = await Promise.all([
         api('GET', '/api/system-status'),
@@ -1502,25 +1521,24 @@
       ]);
       panel.innerHTML = `
         <div class="admin-card">
-          <h2>État du système</h2>
+          <h2>${esc(t('system.status'))}</h2>
           <table class="admin-table">
             <tbody>
-              <tr><td>Version de PHP</td><td>${esc(status.php_version)}</td></tr>
-              <tr><td>Miniatures (GD)</td><td>${status.gd_available ? 'Disponible' : 'Indisponible — couvertures servies à leur résolution d\u2019origine'}</td></tr>
-              <tr><td>Rendu PDF (poppler-utils)</td><td>${status.poppler_available ? 'Disponible' : 'Indisponible — les PDF ne s\u2019afficheront pas'}</td></tr>
-              <tr><td>Envoi d'e-mails</td><td>${status.smtp_configured ? 'Configuré' : 'Non configuré — onglet Maintenance'}</td></tr>
-              <tr><td>Base de données</td><td>${formatBytes(status.db_size_bytes)}</td></tr>
-              <tr><td>Bibliothèques</td><td>${formatCount(status.library_count)}</td></tr>
-              <tr><td>Utilisateurs</td><td>${formatCount(status.user_count)}</td></tr>
-              <tr><td>Objets</td><td>${formatCount(status.item_count)} (${formatCount(status.items_missing_metadata)} sans métadonnées, ${formatCount(status.items_missing_cover)} sans couverture)</td></tr>
+              <tr><td>${esc(t('system.php_version'))}</td><td>${esc(status.php_version)}</td></tr>
+              <tr><td>${esc(t('system.thumbnails_gd'))}</td><td>${status.gd_available ? esc(t('system.available')) : esc(t('system.gd_unavailable'))}</td></tr>
+              <tr><td>${esc(t('system.pdf_rendering'))}</td><td>${status.poppler_available ? esc(t('system.available')) : esc(t('system.poppler_unavailable'))}</td></tr>
+              <tr><td>${esc(t('system.email_sending'))}</td><td>${status.smtp_configured ? esc(t('system.configured')) : esc(t('system.not_configured'))}</td></tr>
+              <tr><td>${esc(t('system.database'))}</td><td>${formatBytes(status.db_size_bytes)}</td></tr>
+              <tr><td>${esc(t('admin.tab_libraries'))}</td><td>${formatCount(status.library_count)}</td></tr>
+              <tr><td>${esc(t('admin.tab_users'))}</td><td>${formatCount(status.user_count)}</td></tr>
+              <tr><td>${esc(t('system.items'))}</td><td>${t('system.items_detail', { total: formatCount(status.item_count), missing_meta: formatCount(status.items_missing_metadata), missing_cover: formatCount(status.items_missing_cover) })}</td></tr>
             </tbody>
           </table>
         </div>
         <div class="admin-card">
-          <h2>Tentatives de connexion</h2>
+          <h2>${esc(t('system.login_attempts'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
-            Après 5 échecs, une adresse IP est bloquée 15 minutes. Si c'est la tienne, débloque-la ici plutôt que
-            d'attendre.
+            ${t('system.login_attempts_hint')}
           </p>
           <div id="loginAttemptsList">
             ${
@@ -1529,24 +1547,24 @@
                     .map(
                       (a) => `
               <div class="admin-row-compact">
-                <span>${esc(a.ip)} — ${a.count} échec${a.count === 1 ? '' : 's'}${a.locked ? ` — <strong>bloquée encore ${Math.ceil(a.seconds_remaining / 60)} min</strong>` : ''}</span>
-                <button class="btn btn-secondary btn-sm" data-clear-attempt="${esc(a.ip)}">Débloquer</button>
+                <span>${esc(a.ip)} — ${t('system.failure_count', { count: a.count })}${a.locked ? ' — <strong>' + esc(t('system.locked_for', { minutes: Math.ceil(a.seconds_remaining / 60) })) + '</strong>' : ''}</span>
+                <button class="btn btn-secondary btn-sm" data-clear-attempt="${esc(a.ip)}">${esc(t('system.unlock'))}</button>
               </div>`
                     )
                     .join('')
-                : '<p class="text-muted" style="font-size:13px;">Aucune tentative échouée enregistrée.</p>'
+                : `<p class="text-muted" style="font-size:13px;">${esc(t('system.no_failed_attempt'))}</p>`
             }
           </div>
         </div>
         <div class="admin-card">
           <div class="admin-card-head">
-            <h2>Journaux</h2>
+            <h2>${esc(t('system.logs'))}</h2>
             <div class="admin-row-actions-group">
               <select class="input" id="logSelect" style="width:auto;">
-                <option value="error">Erreurs (error.log)</option>
-                <option value="access">Accès (access.log)</option>
+                <option value="error">${esc(t('system.log_errors'))}</option>
+                <option value="access">${esc(t('system.log_access'))}</option>
               </select>
-              <button class="btn btn-secondary btn-sm" id="logRefreshBtn">Rafraîchir</button>
+              <button class="btn btn-secondary btn-sm" id="logRefreshBtn">${esc(t('system.refresh'))}</button>
             </div>
           </div>
           <p class="text-muted" id="logPath" style="font-size:12.5px;margin-top:-8px;"></p>
@@ -1558,7 +1576,7 @@
         btn.addEventListener('click', async () => {
           try {
             await api('DELETE', `/api/login-attempts?ip=${encodeURIComponent(btn.dataset.clearAttempt)}`);
-            showToast('IP débloquée.');
+            showToast(t('system.ip_unlocked'));
             renderSystemTab();
           } catch (err) {
             showToast(err.message, true);
@@ -1571,14 +1589,14 @@
       const contentEl = document.getElementById('logContent');
 
       async function loadLogs() {
-        contentEl.textContent = 'Chargement...';
+        contentEl.textContent = t('common.loading');
         try {
           const res = await api('GET', `/api/logs?log=${select.value}&lines=300`);
           pathEl.textContent = res.path;
           if (res.note) {
             contentEl.textContent = res.note;
           } else {
-            contentEl.textContent = res.lines.length ? res.lines.join('\n') : '(vide — aucune entrée)';
+            contentEl.textContent = res.lines.length ? res.lines.join('\n') : t('system.log_empty');
             contentEl.scrollTop = contentEl.scrollHeight; // most recent entries are at the bottom, like a real tail
           }
         } catch (err) {
@@ -1591,7 +1609,7 @@
       document.getElementById('logRefreshBtn').addEventListener('click', loadLogs);
       loadLogs();
     } catch (err) {
-      panel.innerHTML = `<p class="text-muted">Erreur : ${esc(err.message)}</p>`;
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
   }
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/Paths.php';
 
 final class Items
 {
@@ -115,6 +116,13 @@ final class Items
         }
         $item['details'] = self::fetchDetails($pdo, $item['type'], $id);
         $item['tags'] = self::tagsFor($pdo, $id);
+        // The admin console's item page shows this so an admin can find the
+        // file on disk without having to reconstruct it themselves from the
+        // library's own mount path + this item's path (relative — see
+        // README's "Where the actual files live"). Not returned by
+        // Items::search() — only worth computing for the one-item detail
+        // view, not every row of a browsing grid.
+        $item['absolute_path'] = Paths::resolve((string) $item['path']);
         return $item;
     }
 

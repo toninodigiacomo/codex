@@ -7,8 +7,10 @@ require_once __DIR__ . '/../src/AppLog.php';
 AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Totp.php';
+require_once __DIR__ . '/../src/I18n.php';
 
 Auth::bootSession();
+I18n::boot();
 
 $userId = Auth::pendingMfaSetupUserId();
 if ($userId === null) {
@@ -35,18 +37,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . (Auth::isAdmin() ? '/admin.php' : '/library.php'));
         exit;
     }
-    $error = "Code invalide. Vérifie l'heure de ton téléphone et réessaie.";
+    $error = t('mfa_setup.error_invalid_code');
 }
 
 $issuer = 'Codex';
 $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer);
 ?>
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Authentification à deux facteurs requise — Codex</title>
+<title><?= htmlspecialchars(t('mfa_setup.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
@@ -64,33 +66,40 @@ $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer
 <body>
 
 <div class="setup-wrap">
-  <h1>Authentification à deux facteurs requise</h1>
-  <p class="text-muted lead">L'administrateur exige la MFA sur ce compte. Configure-la pour continuer — ton mot de passe est déjà validé.</p>
+  <h1><?= htmlspecialchars(t('mfa_setup.heading')) ?></h1>
+  <p class="text-muted lead"><?= htmlspecialchars(t('mfa_setup.lead')) ?></p>
 
   <div class="setup-card">
     <?php if ($error): ?>
       <div class="error-box"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
-    <p class="text-muted" style="font-size:13px;margin:0 0 10px;">Scanne ce QR code avec Google Authenticator, Authy, 1Password...</p>
+    <p class="text-muted" style="font-size:13px;margin:0 0 10px;"><?= htmlspecialchars(t('invite.mfa_scan_hint')) ?></p>
     <div class="qr-holder" id="qrHolder"></div>
     <details class="manual-key">
-      <summary>Saisie manuelle</summary>
+      <summary><?= htmlspecialchars(t('invite.manual_entry')) ?></summary>
       <input class="input" type="text" readonly value="<?= htmlspecialchars($secret) ?>" onclick="this.select()" style="font-family:monospace;" />
     </details>
 
     <form method="post" class="field-stack">
       <div class="field">
-        <label for="totp_code">Code à 6 chiffres</label>
+        <label for="totp_code"><?= htmlspecialchars(t('invite.six_digit_code')) ?></label>
         <input class="input" type="text" id="totp_code" name="totp_code" required pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" autofocus />
       </div>
-      <button type="submit" class="btn btn-primary btn-block">Activer et continuer</button>
+      <button type="submit" class="btn btn-primary btn-block"><?= htmlspecialchars(t('mfa_setup.activate_continue')) ?></button>
     </form>
     <form method="post" style="margin-top:10px;">
-      <button type="submit" name="regenerate" value="1" class="btn btn-ghost btn-sm">Générer une nouvelle clé</button>
+      <button type="submit" name="regenerate" value="1" class="btn btn-ghost btn-sm"><?= htmlspecialchars(t('setup.regenerate_key')) ?></button>
     </form>
   </div>
+  <p style="margin-top:18px;font-size:12.5px;opacity:0.6;">
+    <a href="#" data-lang-switch="fr" style="<?= I18n::locale() === 'fr' ? 'font-weight:700;' : '' ?>">Français</a>
+    &nbsp;·&nbsp;
+    <a href="#" data-lang-switch="en" style="<?= I18n::locale() === 'en' ? 'font-weight:700;' : '' ?>">English</a>
+  </p>
 </div>
 
+<script>window.I18N = <?= json_encode(I18n::all(), JSON_UNESCAPED_UNICODE) ?>;</script>
+<script src="<?= asset('js/i18n.js') ?>"></script>
 <script src="vendor/qrcode.js"></script>
 <script>
   var qr = qrcode(0, 'M');

@@ -8,8 +8,10 @@ AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Users.php';
 require_once __DIR__ . '/../src/Totp.php';
+require_once __DIR__ . '/../src/I18n.php';
 
 Auth::bootSession();
+I18n::boot();
 
 $token = (string) ($_GET['token'] ?? $_POST['token'] ?? '');
 $invitedUser = $token !== '' ? Users::findByInviteToken($token) : null;
@@ -17,10 +19,10 @@ $invitedUser = $token !== '' ? Users::findByInviteToken($token) : null;
 if (!$invitedUser) {
     http_response_code(410);
     ?>
-    <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Invitation invalide — Codex</title>
+    <!DOCTYPE html><html lang="<?= htmlspecialchars(I18n::locale()) ?>"><head><meta charset="UTF-8"><title><?= htmlspecialchars(t('invite.invalid_title')) ?></title>
     <link rel="stylesheet" href="<?= asset('css/style.css') ?>"></head><body style="max-width:480px;margin:60px auto;padding:0 20px;">
-    <h1>Lien invalide ou expiré</h1>
-    <p class="text-muted">Ce lien d'invitation n'existe pas, a déjà été utilisé, ou a expiré (7 jours). Demande à l'administrateur de t'en renvoyer un.</p>
+    <h1><?= htmlspecialchars(t('invite.invalid_heading')) ?></h1>
+    <p class="text-muted"><?= htmlspecialchars(t('invite.invalid_body')) ?></p>
     </body></html>
     <?php
     exit;
@@ -40,11 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['regenerate'])) {
     $code = (string) ($_POST['totp_code'] ?? '');
 
     if (strlen($password) < 12) {
-        $error = 'Le mot de passe doit contenir au moins 12 caractères.';
+        $error = t('setup.error_password_length');
     } elseif ($password !== $confirm) {
-        $error = 'Les deux mots de passe ne correspondent pas.';
+        $error = t('setup.error_password_mismatch');
     } elseif ($enableMfa && !Totp::verify($secret, $code)) {
-        $error = "Code de l'application d'authentification invalide.";
+        $error = t('invite.error_totp');
     } else {
         Users::acceptInvite((int) $invitedUser['id'], $password, $enableMfa ? $secret : null);
         unset($_SESSION['invite_pending_secret_' . $invitedUser['id']]);
@@ -61,11 +63,11 @@ $issuer = 'Codex';
 $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
 ?>
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Bienvenue — Codex</title>
+<title><?= htmlspecialchars(t('invite.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
@@ -88,8 +90,8 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
 <body>
 
 <div class="setup-wrap">
-  <h1>Bienvenue, <?= htmlspecialchars($invitedUser['username']) ?></h1>
-  <p class="text-muted lead">Un administrateur t'a créé un accès à Codex. Choisis ton mot de passe pour l'activer.</p>
+  <h1><?= htmlspecialchars(t('invite.welcome', ['username' => $invitedUser['username']])) ?></h1>
+  <p class="text-muted lead"><?= htmlspecialchars(t('invite.lead')) ?></p>
 
   <div class="setup-card">
     <?php if ($error): ?>
@@ -98,45 +100,52 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
     <form method="post" class="field-stack">
       <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>" />
       <div class="field">
-        <label for="password">Mot de passe (12 caractères minimum)</label>
+        <label for="password"><?= htmlspecialchars(t('setup.password_min')) ?></label>
         <input class="input" type="password" id="password" name="password" required minlength="12" autocomplete="new-password" />
       </div>
       <div class="field">
-        <label for="password_confirm">Confirmer le mot de passe</label>
+        <label for="password_confirm"><?= htmlspecialchars(t('setup.confirm_password')) ?></label>
         <input class="input" type="password" id="password_confirm" name="password_confirm" required minlength="12" autocomplete="new-password" />
       </div>
       <label class="show-pw-toggle">
-        <input type="checkbox" id="showPasswords" /> Afficher les mots de passe
+        <input type="checkbox" id="showPasswords" /> <?= htmlspecialchars(t('setup.show_passwords')) ?>
       </label>
 
       <?php if ($invitedUser['mfa_required']): ?>
-        <p class="text-muted" style="font-size:13px;font-weight:600;">L'administrateur exige l'authentification à deux facteurs pour ce compte.</p>
+        <p class="text-muted" style="font-size:13px;font-weight:600;"><?= htmlspecialchars(t('invite.mfa_required')) ?></p>
         <input type="hidden" name="enable_mfa" value="1" />
       <?php else: ?>
         <label class="mfa-toggle">
           <input type="checkbox" id="enable_mfa" name="enable_mfa" <?= isset($_POST['enable_mfa']) ? 'checked' : '' ?> />
-          Activer l'authentification à deux facteurs (recommandé)
+          <?= htmlspecialchars(t('invite.mfa_enable')) ?>
         </label>
       <?php endif; ?>
 
       <div id="mfaSection">
-        <p class="text-muted" style="font-size:13px;margin:0 0 10px;">Scanne ce QR code avec Google Authenticator, Authy, 1Password...</p>
+        <p class="text-muted" style="font-size:13px;margin:0 0 10px;"><?= htmlspecialchars(t('invite.mfa_scan_hint')) ?></p>
         <div class="qr-holder" id="qrHolder"></div>
         <details class="manual-key">
-          <summary>Saisie manuelle</summary>
+          <summary><?= htmlspecialchars(t('invite.manual_entry')) ?></summary>
           <input class="input" type="text" readonly value="<?= htmlspecialchars($secret) ?>" onclick="this.select()" style="font-family:monospace;" />
         </details>
         <div class="field" style="margin-top:10px;">
-          <label for="totp_code">Code à 6 chiffres</label>
+          <label for="totp_code"><?= htmlspecialchars(t('invite.six_digit_code')) ?></label>
           <input class="input" type="text" id="totp_code" name="totp_code" pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" />
         </div>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-block">Activer mon compte</button>
+      <button type="submit" class="btn btn-primary btn-block"><?= htmlspecialchars(t('invite.activate')) ?></button>
     </form>
   </div>
+  <p style="margin-top:18px;font-size:12.5px;opacity:0.6;">
+    <a href="#" data-lang-switch="fr" style="<?= I18n::locale() === 'fr' ? 'font-weight:700;' : '' ?>">Français</a>
+    &nbsp;·&nbsp;
+    <a href="#" data-lang-switch="en" style="<?= I18n::locale() === 'en' ? 'font-weight:700;' : '' ?>">English</a>
+  </p>
 </div>
 
+<script>window.I18N = <?= json_encode(I18n::all(), JSON_UNESCAPED_UNICODE) ?>;</script>
+<script src="<?= asset('js/i18n.js') ?>"></script>
 <script src="vendor/qrcode.js"></script>
 <script>
   var qr = qrcode(0, 'M');
