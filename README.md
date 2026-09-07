@@ -15,14 +15,14 @@ This project uses **SQLite** (`data/codex.sqlite`) - the scale (potentially thou
 ```
 libraries          id, name, path, type, last_synced_at
 items              id, type, title, path, format, cover_path, publisher,
-                    library_id, series_id, issue_number, synopsis,
-                    metadata_checked_at, file_size, file_mtime, added_at
+                   library_id, series_id, issue_number, synopsis,
+                   metadata_checked_at, file_size, file_mtime, added_at
 comic_details      item_id, writer, penciller, inker, colorist, letterer, cover_artist, editor, genre, characters, age_rating
 ebook_details      item_id, author, isbn, language
 magazine_details   item_id, issue_date, frequency
 series             id, name, type, description, cover_path
 tags               id, name
-item_tags          item_id, tag_id                       (many-to-many)
+item_tags          item_id, tag_id -- (many-to-many)
 users              id, username, email, password_hash, role, status, totp_secret, mfa_required, pending_email*, pending_password*
 user_libraries     user_id, library_id                    (many-to-many - a reader's granted libraries)
 reading_progress   user_id, item_id, position, total_pages, completed_at, updated_at
