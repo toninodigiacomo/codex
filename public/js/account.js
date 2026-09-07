@@ -99,6 +99,13 @@
           ${showEmail ? '<div class="account-section" id="accountEmailSection"></div>' : ''}
           <div class="account-section" id="accountPasswordSection"></div>
           <div class="account-section">
+            <h3>${esc(t('account.appearance'))}</h3>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="btn ${document.documentElement.dataset.theme !== 'light' ? 'btn-primary' : 'btn-secondary'}" data-theme-switch="dark">${esc(t('account.theme_dark'))}</button>
+              <button type="button" class="btn ${document.documentElement.dataset.theme === 'light' ? 'btn-primary' : 'btn-secondary'}" data-theme-switch="light">${esc(t('account.theme_light'))}</button>
+            </div>
+          </div>
+          <div class="account-section">
             <a class="btn btn-secondary" href="logout.php">${esc(t('nav.logout'))}</a>
           </div>
           <div class="dialog-actions">
@@ -106,6 +113,13 @@
           </div>
         </div>`;
       document.body.appendChild(backdrop);
+
+      backdrop.querySelectorAll('[data-theme-switch]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.cookie = 'codex_theme=' + btn.dataset.themeSwitch + ';path=/;max-age=' + 60 * 60 * 24 * 365;
+          location.reload();
+        });
+      });
 
       emailSection = backdrop.querySelector('#accountEmailSection');
       passwordSection = backdrop.querySelector('#accountPasswordSection');

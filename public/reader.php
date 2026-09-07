@@ -5,6 +5,7 @@ require_once __DIR__ . '/../src/AppLog.php';
 AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/I18n.php';
+require_once __DIR__ . '/../src/Theme.php';
 Auth::bootSession();
 I18n::boot();
 Auth::requireLogin();
@@ -12,7 +13,7 @@ Auth::requireLogin();
 $itemId = (int) ($_GET['id'] ?? 0);
 ?>
 <!DOCTYPE html>
-<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

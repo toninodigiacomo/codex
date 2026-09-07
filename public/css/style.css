@@ -16,6 +16,14 @@
   --color-onaccent: #14100d;
   --color-divider: color-mix(in srgb, #f2f2f0 12%, transparent);
 
+  /* The topbar/nav is visually distinct from the page in the light theme
+     (a dark bar on a light page, à la Ubooquity) but not in the dark one,
+     where a separate bar would have nothing to contrast against — so it
+     defaults to just matching the page here, and only the light theme
+     below actually overrides it to something different. */
+  --color-nav-bg: var(--color-bg);
+  --color-nav-text: var(--color-text);
+
   /* Tonal ramps — 100 = lightest/palest, 900 = darkest/deepest. */
   --color-neutral-100: #f2f2f0;
   --color-neutral-200: #d9d9d6;
@@ -65,6 +73,60 @@
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
   --shadow-md: 0 6px 16px rgba(0,0,0,0.5);
   --shadow-lg: 0 16px 40px rgba(0,0,0,0.6);
+}
+
+/*
+ * Light theme — Ubooquity-inspired: light page, a dark nav bar kept as
+ * its own distinct band rather than blending into the page (see
+ * --color-nav-bg's comment above), teal-green as the accent instead of
+ * orange. Toggled via a `data-theme="light"` attribute on <html>, set by
+ * src/Theme.php from a cookie — same mechanism as src/I18n.php's locale,
+ * and deliberately not applied to login.php/setup.php/accept-invite.php/
+ * mfa-setup.php's own "pitch" panel, which stays dark regardless as a
+ * fixed brand surface rather than part of the themeable app chrome.
+ */
+[data-theme='light'] {
+  --color-bg: #f4f4f3;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-text: #1a1a1a;
+  --color-accent: #0d9488;
+  --color-accent-2: #2f86dd;
+  --color-onaccent: #ffffff;
+  --color-divider: color-mix(in srgb, #1a1a1a 12%, transparent);
+
+  --color-nav-bg: #14171a;
+  --color-nav-text: #f2f2f0;
+
+  /* Ramp inverted (100 stays "the tone closest to body text", 900 stays
+     "the tone closest to body background") rather than kept as literal
+     dark-mode values — the handful of components built directly on these
+     (badges, neutral tags) assume that relationship, not specific hex
+     values, so inverting it is what keeps them looking like a coherent
+     light/dark chip instead of a dark smudge against a light page. */
+  --color-neutral-100: #1a1a1a;
+  --color-neutral-200: #333330;
+  --color-neutral-300: #4d4d47;
+  --color-neutral-400: #66665f;
+  --color-neutral-500: #8c8c86;
+  --color-neutral-600: #b3b3ae;
+  --color-neutral-700: #d9d9d6;
+  --color-neutral-800: #ececea;
+  --color-neutral-900: #ffffff;
+
+  --color-accent-100: #ecfdf9;
+  --color-accent-200: #ccfbf1;
+  --color-accent-300: #99f6e4;
+  --color-accent-400: #2dd4bf;
+  --color-accent-500: #0d9488;
+  --color-accent-600: #0f766e;
+  --color-accent-700: #115e59;
+  --color-accent-800: #134e4a;
+  --color-accent-900: #042f2e;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 6px 16px rgba(0,0,0,0.1);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.16);
 }
 
 body {
@@ -183,7 +245,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 .tag-outline { border: 1px solid var(--color-accent); color: var(--color-accent); }
 
 /* — navigation — */
-.nav { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); }
+.nav { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--color-nav-bg); color: var(--color-nav-text); }
 .nav-brand { font-family: var(--font-heading); font-weight: 900; font-size: 19px; letter-spacing: -0.02em; }
 .nav a { color: inherit; text-decoration: none; font-size: 14px; font-weight: 500; }
 .nav a:hover, .nav a[aria-current='page'] { color: var(--color-accent); }

@@ -214,6 +214,9 @@ return [
     'account.change_password' => 'Changer le mot de passe',
     'account.mfa_code_required' => 'Code de double authentification requis.',
     'account.verifying' => 'Vérification...',
+    'account.appearance' => 'Apparence',
+    'account.theme_dark' => 'Sombre',
+    'account.theme_light' => 'Clair',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',

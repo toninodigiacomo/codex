@@ -213,6 +213,9 @@ return [
     'account.change_password' => 'Change password',
     'account.mfa_code_required' => 'Two-factor authentication code required.',
     'account.verifying' => 'Verifying...',
+    'account.appearance' => 'Appearance',
+    'account.theme_dark' => 'Dark',
+    'account.theme_light' => 'Light',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',
