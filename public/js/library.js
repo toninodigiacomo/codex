@@ -19,8 +19,8 @@
     tag_id: null,
     favorites: false, // sidebar "Favoris" filter — this user's own starred items (Favorites.php)
     q: '',
-    sort: 'added_at',
-    dir: 'DESC',
+    sort: 'filename',
+    dir: 'ASC',
     page: 1, // 1-indexed, browse mode only — reset to 1 whenever a filter/search/sort changes
     groupLevel: null, // 'library' | 'path' — only meaningful when mode === 'group'
     groupLibraryId: null, // the single library the éditeur flow is scoped to, once past the library tile grid
@@ -62,6 +62,11 @@
   const typeTabs = document.getElementById('typeTabs');
   const homeBtn = document.getElementById('homeBtn');
   const homeEmptyState = document.getElementById('homeEmptyState');
+  const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+  const mobileNavDrawer = document.getElementById('mobileNavDrawer');
+  const mobileNavBackdrop = document.getElementById('mobileNavBackdrop');
+  const appShell = document.querySelector('.app-shell');
+  const appBody = document.querySelector('.app-body');
   const grid = document.getElementById('itemGrid');
   const emptyState = document.getElementById('emptyState');
   const resultCount = document.getElementById('resultCount');
@@ -485,6 +490,12 @@
     groupViewTitle.textContent = title;
     groupBackBtn.textContent = t('library.back');
     groupGrid.innerHTML = '';
+    // Centering (see library.css) only makes sense at the very first
+    // tile level (one tile per library of this type) — a short row at
+    // any deeper level (éditeurs, collections) stays left-aligned, same
+    // as the standalone-items browse grid it can also show alongside
+    // subfolder tiles.
+    groupGrid.classList.toggle('group-grid-centered', state.groupLevel === 'library');
     groupEmptyState.hidden = true;
     groupPagination.hidden = true;
   }
@@ -672,8 +683,65 @@
       if (state.mode === 'browse' && lastBrowseItems.length) {
         renderGridTrimmed(grid, lastBrowseItems, null);
       }
+      updateMobileNavLayout();
     }, 200);
   });
+
+  /**
+   * #typeTabs (in .nav) and .sidebar (in .app-body) are two completely
+   * separate DOM subtrees on desktop — there's no shared parent to wrap
+   * them in for a combined mobile drawer without breaking the desktop
+   * grid/flex layout. Rather than duplicate their markup (and every
+   * click handler already bound to the real ones) for a mobile-only
+   * copy, this moves the *actual* elements into #mobileNavDrawer when
+   * the viewport is mobile-sized, and back to their original parents
+   * once it isn't — appendChild() relocates a node in the DOM without
+   * touching its listeners, so nothing needs rewiring either way.
+   */
+  const mobileQuery = window.matchMedia('(max-width: 760px)');
+  let mobileNavLayoutIsMobile = null; // null so the first real call always runs, even if it happens to start out matching mobileQuery's initial state
+  function updateMobileNavLayout() {
+    const isMobile = mobileQuery.matches;
+    if (isMobile === mobileNavLayoutIsMobile) return;
+    mobileNavLayoutIsMobile = isMobile;
+    if (isMobile) {
+      mobileNavDrawer.appendChild(typeTabs);
+      mobileNavDrawer.appendChild(document.querySelector('.sidebar'));
+    } else {
+      closeMobileNav();
+      const nav = document.querySelector('.nav.topbar');
+      nav.insertBefore(typeTabs, document.getElementById('searchInput')?.closest('.search-box'));
+      appBody.insertBefore(document.querySelector('.sidebar'), appBody.firstChild);
+    }
+  }
+
+  function openMobileNav() {
+    appShell.classList.add('mobile-nav-open');
+    mobileNavBackdrop.hidden = false;
+    mobileNavDrawer.hidden = false;
+    mobileMenuBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeMobileNav() {
+    appShell.classList.remove('mobile-nav-open');
+    mobileNavBackdrop.hidden = true;
+    mobileNavDrawer.hidden = true;
+    mobileMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+  mobileMenuBtn.addEventListener('click', () => {
+    if (appShell.classList.contains('mobile-nav-open')) closeMobileNav();
+    else openMobileNav();
+  });
+  mobileNavBackdrop.addEventListener('click', closeMobileNav);
+  // Picking a type/library/tag from the drawer should close it, same as
+  // any normal nav menu — otherwise it stays covering the freshly
+  // loaded results the tap was meant to reveal.
+  mobileNavDrawer.addEventListener('click', (e) => {
+    if (e.target.closest('input[type="radio"], input[type="checkbox"], [data-filter-key], [data-group-tile]')) {
+      closeMobileNav();
+    }
+  });
+  mobileQuery.addEventListener('change', updateMobileNavLayout);
+  updateMobileNavLayout();
 
   Promise.all([
     fetchJson('/api/libraries').catch(() => []),

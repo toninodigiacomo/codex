@@ -45,6 +45,7 @@ final class Database
             'metadata_checked_at' => 'TEXT',
             'file_size' => 'INTEGER',
             'file_mtime' => 'INTEGER',
+            'filename' => 'TEXT',
         ],
         'comic_details' => [
             'penciller' => 'TEXT',

@@ -987,6 +987,14 @@
       const s = await api('GET', '/api/settings');
       panel.innerHTML = `
         <div class="admin-card">
+          <h2>${esc(t('settings.appearance'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('settings.appearance_hint'))}</p>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn ${s.theme !== 'light' ? 'btn-primary' : 'btn-secondary'}" id="themeDarkBtn">${esc(t('settings.theme_dark'))}</button>
+            <button type="button" class="btn ${s.theme === 'light' ? 'btn-primary' : 'btn-secondary'}" id="themeLightBtn">${esc(t('settings.theme_light'))}</button>
+          </div>
+        </div>
+        <div class="admin-card">
           <h2>${esc(t('settings.thumbnails'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">
             ${t('settings.thumbnails_hint')} ${s.gd_available ? t('settings.thumbnails_gd_available') : t('settings.thumbnails_gd_unavailable')}
@@ -1125,6 +1133,17 @@
           showToast(err.message, true);
         }
       });
+
+      async function setTheme(theme) {
+        try {
+          await api('PUT', '/api/settings', { theme });
+          location.reload(); // data-theme lives on <html>, set server-side at page load — only a reload actually shows the new theme
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      }
+      document.getElementById('themeDarkBtn').addEventListener('click', () => setTheme('dark'));
+      document.getElementById('themeLightBtn').addEventListener('click', () => setTheme('light'));
 
       document.getElementById('thumbnailWidthSlider').addEventListener('input', (e) => {
         const w = Number(e.target.value);

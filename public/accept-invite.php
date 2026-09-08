@@ -9,9 +9,14 @@ require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Users.php';
 require_once __DIR__ . '/../src/Totp.php';
 require_once __DIR__ . '/../src/I18n.php';
+require_once __DIR__ . '/../src/Theme.php';
 
 Auth::bootSession();
 I18n::boot();
+// These auth pages iterate quickly during setup/testing — an explicit
+// no-store beats letting a browser (mobile Safari especially) silently
+// keep serving a stale copy after a real fix has already shipped.
+header('Cache-Control: no-store, must-revalidate');
 
 $token = (string) ($_GET['token'] ?? $_POST['token'] ?? '');
 $invitedUser = $token !== '' ? Users::findByInviteToken($token) : null;
@@ -19,7 +24,7 @@ $invitedUser = $token !== '' ? Users::findByInviteToken($token) : null;
 if (!$invitedUser) {
     http_response_code(410);
     ?>
-    <!DOCTYPE html><html lang="<?= htmlspecialchars(I18n::locale()) ?>"><head><meta charset="UTF-8"><title><?= htmlspecialchars(t('invite.invalid_title')) ?></title>
+    <!DOCTYPE html><html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>"><head><meta charset="UTF-8"><title><?= htmlspecialchars(t('invite.invalid_title')) ?></title>
     <link rel="stylesheet" href="<?= asset('css/style.css') ?>"></head><body style="max-width:480px;margin:60px auto;padding:0 20px;">
     <h1><?= htmlspecialchars(t('invite.invalid_heading')) ?></h1>
     <p class="text-muted"><?= htmlspecialchars(t('invite.invalid_body')) ?></p>
@@ -63,7 +68,7 @@ $issuer = 'Codex';
 $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
 ?>
 <!DOCTYPE html>
-<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

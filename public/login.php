@@ -7,9 +7,14 @@ require_once __DIR__ . '/../src/AppLog.php';
 AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/I18n.php';
+require_once __DIR__ . '/../src/Theme.php';
 
 Auth::bootSession();
 I18n::boot();
+// These auth pages iterate quickly during setup/testing — an explicit
+// no-store beats letting a browser (mobile Safari especially) silently
+// keep serving a stale copy after a real fix has already shipped.
+header('Cache-Control: no-store, must-revalidate');
 
 if (!Auth::isSetupComplete()) {
     header('Location: /setup.php');
@@ -48,16 +53,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 ?>
 <!DOCTYPE html>
-<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title><?= htmlspecialchars(t('login.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
-  body { margin: 0; }
+  body { margin: 0; overflow-x: hidden; }
   .split { display: grid; grid-template-columns: minmax(360px, 44%) 1fr; min-height: 100vh; }
-  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
 
   .pitch {
     background:
@@ -72,12 +76,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
      when a third block (the old spec-row) sat at the bottom keeping the
      middle one roughly centered by itself; removing that block without
      this would leave just two items pinned to opposite ends instead. */
-  .pitch > div:last-child { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .pitch > .pitch-text { flex: 1; display: flex; flex-direction: column; justify-content: center; }
   .pitch-brand { display: flex; align-items: baseline; gap: 9px; }
   .pitch-brand .name { font-family: var(--font-heading); font-weight: 900; font-size: 22px; letter-spacing: -0.02em; }
   .pitch-brand .sub { font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.55; }
-  .pitch h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.02; letter-spacing: -0.03em; margin: 0; max-width: 460px; }
+  .pitch h1 { font-size: clamp(34px, 5vw, 56px); line-height: 1.02; letter-spacing: -0.03em; margin: 0; }
   .pitch p { margin: 20px 0 0; font-size: 14.5px; line-height: 1.6; opacity: 0.75; max-width: 340px; }
+  .pitch-footer { margin: 0; font-size: 11.5px; opacity: 0.5; }
+  .pitch-footer a { color: inherit; text-decoration: underline; }
+  .pitch-footer a:hover { opacity: 0.8; }
   .spec-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; font-size: 11px; line-height: 1.5; }
   .spec-row div { border-top: 1px solid rgba(242,242,240,0.16); padding-top: 8px; }
   .spec-row .k { opacity: 0.5; letter-spacing: 0.08em; text-transform: uppercase; font-size: 9.5px; font-weight: 600; }
@@ -101,6 +108,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   .password-toggle:hover { opacity: 1; }
   .error-box { background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface)); color: #ff8a8a; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
   .success-box { background: color-mix(in srgb, #2fbf71 18%, var(--color-surface)); color: #7be3ab; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13.5px; font-weight: 600; margin-bottom: 16px; }
+
+  /* Placed LAST, deliberately — and matched to the SAME specificity as
+     the rules being overridden (.pitch .pitch-text, not .pitch-text
+     alone): .pitch > .pitch-text above is two classes, so a plain
+     .pitch-text selector here would keep losing to it regardless of
+     position in the file — specificity outranks source order, source
+     order only breaks a genuine tie. This bit me twice already: moving
+     this block to the end alone would NOT have been enough on its own. */
+  @media (max-width: 860px) {
+    .split { grid-template-columns: 1fr; }
+    .pitch { padding: 16px 20px 10px; }
+    .pitch .pitch-text, .pitch .pitch-footer { display: none; }
+    .form-side { padding: 28px 20px; }
+  }
 </style>
 </head>
 <body>
@@ -111,10 +132,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <span class="name"><?= htmlspecialchars(t('app.name')) ?></span>
       <span class="sub"><?= htmlspecialchars(t('login.pitch_sub')) ?></span>
     </div>
-    <div>
-      <h1><?= htmlspecialchars(t('login.pitch_h1')) ?></h1>
+    <div class="pitch-text">
+      <h1><?= str_replace('{br}', '<br>', htmlspecialchars(t('login.pitch_h1'))) ?></h1>
       <p><?= htmlspecialchars(t('login.pitch_p')) ?></p>
     </div>
+    <p class="pitch-footer">
+      <a href="https://github.com/toninodigiacomo/codex" target="_blank" rel="noopener noreferrer">GitHub</a>
+      &nbsp;·&nbsp; GNU General Public License v3.0
+    </p>
   </div>
 
   <div class="form-side">

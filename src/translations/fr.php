@@ -19,7 +19,7 @@ return [
     // --- login.php ---
     'login.title' => 'Connexion — Codex',
     'login.pitch_sub' => 'library server',
-    'login.pitch_h1' => 'Toute ma bibliothèque, à portée de clic.',
+    'login.pitch_h1' => 'Toute ma bibliothèque,{br}à portée de clic.',
     'login.pitch_p' => "BD, ebooks, magazines et scans — indexés depuis mes propres disques, lisibles depuis n'importe quel navigateur.",
     'login.step_label' => 'Connexion',
     'login.heading' => 'Se connecter',
@@ -97,6 +97,9 @@ return [
     'library.sort_added_asc' => 'Ajouts anciens',
     'library.sort_title_asc' => 'Titre (A→Z)',
     'library.sort_title_desc' => 'Titre (Z→A)',
+    'library.sort_filename_asc' => 'Nom du fichier (A→Z)',
+    'library.sort_filename_desc' => 'Nom du fichier (Z→A)',
+    'library.menu' => 'Menu',
     'library.empty_browse' => 'Aucun résultat. La bibliothèque est-elle déjà indexée ?',
     'library.empty_group' => 'Aucun résultat.',
     'library.chip_favorites' => 'Favoris',
@@ -214,9 +217,10 @@ return [
     'account.change_password' => 'Changer le mot de passe',
     'account.mfa_code_required' => 'Code de double authentification requis.',
     'account.verifying' => 'Vérification...',
-    'account.appearance' => 'Apparence',
-    'account.theme_dark' => 'Sombre',
-    'account.theme_light' => 'Clair',
+    'settings.appearance' => 'Apparence',
+    'settings.appearance_hint' => "S'applique à tout le monde — chaque visiteur voit le même thème, y compris sur la page de connexion.",
+    'settings.theme_dark' => 'Sombre',
+    'settings.theme_light' => 'Clair',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',

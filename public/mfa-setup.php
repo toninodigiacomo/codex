@@ -8,9 +8,14 @@ AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/Totp.php';
 require_once __DIR__ . '/../src/I18n.php';
+require_once __DIR__ . '/../src/Theme.php';
 
 Auth::bootSession();
 I18n::boot();
+// These auth pages iterate quickly during setup/testing — an explicit
+// no-store beats letting a browser (mobile Safari especially) silently
+// keep serving a stale copy after a real fix has already shipped.
+header('Cache-Control: no-store, must-revalidate');
 
 $userId = Auth::pendingMfaSetupUserId();
 if ($userId === null) {
@@ -44,7 +49,7 @@ $issuer = 'Codex';
 $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer);
 ?>
 <!DOCTYPE html>
-<html lang="<?= htmlspecialchars(I18n::locale()) ?>">
+<html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

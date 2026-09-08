@@ -18,7 +18,7 @@ return [
     // --- login.php ---
     'login.title' => 'Sign in — Codex',
     'login.pitch_sub' => 'library server',
-    'login.pitch_h1' => 'Your whole library, one click away.',
+    'login.pitch_h1' => 'Your whole library,{br}one click away.',
     'login.pitch_p' => 'Comics, ebooks, magazines and scans — indexed from your own drives, readable from any browser.',
     'login.step_label' => 'Sign in',
     'login.heading' => 'Sign in',
@@ -96,6 +96,9 @@ return [
     'library.sort_added_asc' => 'Oldest added',
     'library.sort_title_asc' => 'Title (A→Z)',
     'library.sort_title_desc' => 'Title (Z→A)',
+    'library.sort_filename_asc' => 'File name (A→Z)',
+    'library.sort_filename_desc' => 'File name (Z→A)',
+    'library.menu' => 'Menu',
     'library.empty_browse' => 'No results. Has the library been indexed yet?',
     'library.empty_group' => 'No results.',
     'library.chip_favorites' => 'Favorites',
@@ -213,9 +216,10 @@ return [
     'account.change_password' => 'Change password',
     'account.mfa_code_required' => 'Two-factor authentication code required.',
     'account.verifying' => 'Verifying...',
-    'account.appearance' => 'Appearance',
-    'account.theme_dark' => 'Dark',
-    'account.theme_light' => 'Light',
+    'settings.appearance' => 'Appearance',
+    'settings.appearance_hint' => 'Applies to everyone — every visitor sees the same theme, including on the login page.',
+    'settings.theme_dark' => 'Dark',
+    'settings.theme_light' => 'Light',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',

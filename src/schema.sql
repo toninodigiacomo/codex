@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS items (
   file_mtime   INTEGER,            -- file's current stat() against these to detect an edit in place (same path,
                                     -- different content) far more cheaply than hashing every file's bytes every
                                     -- time, at the cost of missing the rare edit that preserves both exactly
+  filename     TEXT,               -- basename(path), incl. extension — stored separately from `title` (which
+                                    -- can be hand-edited or come from ComicInfo.xml, e.g. "Numéro (16)") so
+                                    -- sorting "by filename" means the actual file on disk, not the curated title
   added_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 

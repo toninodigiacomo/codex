@@ -88,12 +88,12 @@
 [data-theme='light'] {
   --color-bg: #f4f4f3;
   --color-surface: #ffffff;
-  --color-surface-raised: #ffffff;
+  --color-surface-raised: #f0f0ee;
   --color-text: #1a1a1a;
   --color-accent: #0d9488;
   --color-accent-2: #2f86dd;
   --color-onaccent: #ffffff;
-  --color-divider: color-mix(in srgb, #1a1a1a 12%, transparent);
+  --color-divider: color-mix(in srgb, #1a1a1a 18%, transparent);
 
   --color-nav-bg: #14171a;
   --color-nav-text: #f2f2f0;
@@ -281,7 +281,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 }
 
 /* — account popup (public/js/account.js) — */
-.account-dialog { width: min(460px, 100%); max-height: min(640px, 90vh); overflow-y: auto; }
+.account-dialog { width: min(560px, 100%); max-height: min(820px, 94vh); overflow-y: auto; }
 .account-section { padding: var(--space-3) 0; border-top: 1px solid var(--color-divider); }
 .account-section:first-of-type { border-top: none; padding-top: 0; }
 .account-section h3 { font-size: 14.5px; margin-bottom: var(--space-2); }

@@ -22,6 +22,7 @@ require_once __DIR__ . '/../../src/Favorites.php';
 require_once __DIR__ . '/../../src/PdfRenderer.php';
 require_once __DIR__ . '/../../src/AccountManager.php';
 require_once __DIR__ . '/../../src/EmailTemplates.php';
+require_once __DIR__ . '/../../src/Theme.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
@@ -133,12 +134,11 @@ function updateFileStat(array $item): void
     $absPath = Paths::resolve($item['path']);
     $size = @filesize($absPath);
     $mtime = @filemtime($absPath);
-    if ($size !== false || $mtime !== false) {
-        Items::update((int) $item['id'], [
-            'file_size' => $size !== false ? $size : null,
-            'file_mtime' => $mtime !== false ? $mtime : null,
-        ]);
-    }
+    Items::update((int) $item['id'], [
+        'file_size' => $size !== false ? $size : null,
+        'file_mtime' => $mtime !== false ? $mtime : null,
+        'filename' => basename($absPath),
+    ]);
 }
 
 /** The éditeur nav's folder path travels as a JSON-encoded array of segments (e.g. ["Panini Books","Marvel"]) — a single delimited string would break on a folder name that itself contains the delimiter. Anything malformed or not a list of strings is treated as the root. */
@@ -1146,10 +1146,19 @@ try {
                 $config['home_shelf_rows'] = Settings::homeShelfRows();
                 $config['home_shelf_fetch_limit'] = Settings::homeShelfFetchLimit();
                 $config['gd_available'] = Thumbnails::available();
+                $config['theme'] = Theme::current();
                 respond(200, $config);
             }
             if ($method === 'PUT') {
                 $body = bodyJson();
+                if (isset($body['theme'])) {
+                    try {
+                        Theme::set((string) $body['theme']);
+                    } catch (InvalidArgumentException $e) {
+                        respond(400, ['error' => $e->getMessage()]);
+                    }
+                    unset($body['theme']);
+                }
                 if (isset($body['site_url'])) {
                     Settings::set('site_url', trim((string) $body['site_url']) ?: null);
                     unset($body['site_url']);

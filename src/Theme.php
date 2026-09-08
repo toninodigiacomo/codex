@@ -2,22 +2,30 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/Settings.php';
+
 /**
- * Two themes, same mechanism as src/I18n.php's locale: a plain
- * (non-httponly) cookie so the account popup's switcher can set it
- * client-side, read server-side on every page so the right
- * `data-theme` attribute is already on <html> before first paint —
- * no flash of the wrong theme while JS loads.
+ * A single site-wide theme, not a per-user/per-browser preference —
+ * set once by an admin (Réglages tab), applied identically to every
+ * page for every visitor, logged-in or not. Stored in the `settings`
+ * table like everything else on that tab, rather than a cookie.
  */
 final class Theme
 {
     private const SUPPORTED = ['dark', 'light'];
     private const DEFAULT_THEME = 'dark';
-    private const COOKIE_NAME = 'codex_theme';
 
     public static function current(): string
     {
-        $cookie = $_COOKIE[self::COOKIE_NAME] ?? null;
-        return is_string($cookie) && in_array($cookie, self::SUPPORTED, true) ? $cookie : self::DEFAULT_THEME;
+        $value = Settings::get('theme');
+        return is_string($value) && in_array($value, self::SUPPORTED, true) ? $value : self::DEFAULT_THEME;
+    }
+
+    public static function set(string $theme): void
+    {
+        if (!in_array($theme, self::SUPPORTED, true)) {
+            throw new InvalidArgumentException('Thème invalide.');
+        }
+        Settings::set('theme', $theme);
     }
 }

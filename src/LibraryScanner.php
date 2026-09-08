@@ -140,7 +140,11 @@ final class LibraryScanner
                     LibraryJobs::working($library['id'], 'sync', $unchanged + $added + $updated, count($foundFiles), $row['title']);
                     AppLog::note("sync: item {$row['id']} ({$relPath}) modifié sur le disque, ré-extraction en cours");
                     ItemEnrichment::run($item);
-                    Items::update((int) $row['id'], ['file_size' => $currentSize !== false ? $currentSize : null, 'file_mtime' => $currentMtime !== false ? $currentMtime : null]);
+                    Items::update((int) $row['id'], [
+                        'file_size' => $currentSize !== false ? $currentSize : null,
+                        'file_mtime' => $currentMtime !== false ? $currentMtime : null,
+                        'filename' => basename($absPath),
+                    ]);
                     AppLog::note("sync: item {$row['id']} ok");
                 }
                 $updated++;
@@ -168,6 +172,7 @@ final class LibraryScanner
                     'library_id' => $library['id'],
                     'file_size' => $currentSize !== false ? $currentSize : null,
                     'file_mtime' => $currentMtime !== false ? $currentMtime : null,
+                    'filename' => basename($absPath),
                 ]);
             } catch (PDOException $e) {
                 // items.path is UNIQUE across every library, not per-library — this

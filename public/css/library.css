@@ -1,7 +1,7 @@
 .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
   border-bottom: 1px solid var(--color-divider); flex-wrap: wrap;
-  position: sticky; top: 0; z-index: 20; background: var(--color-bg);
+  position: sticky; top: 0; z-index: 20; background: var(--color-nav-bg); color: var(--color-nav-text);
 }
 .search-box { flex: 1; max-width: 420px; margin-left: auto; }
 .search-box .input { height: 38px; }
@@ -14,7 +14,6 @@
 .nav-home-btn:hover { opacity: 0.85; }
 
 .app-body { flex: 1; display: grid; grid-template-columns: 232px 1fr; }
-@media (max-width: 760px) { .app-body { grid-template-columns: 1fr; } .sidebar { display: none; } }
 
 .sidebar {
   border-right: 1px solid var(--color-divider); padding: var(--space-4) var(--space-3);
@@ -54,6 +53,20 @@
   max-width: var(--grid-max-width, 1650px);
   margin-left: auto; margin-right: auto;
 }
+/* Only the éditeur nav's very first tile level (one tile per library of
+   the chosen type, library.js's openLibraryLevel) centers a short row —
+   every other level (éditeurs, collections, the standalone-items browse
+   grid) stays left-aligned/standard, toggled via this modifier class
+   rather than on .item-grid itself, on purpose.
+   Flex, not grid: .item-grid's own auto-fill + 1fr sizing always fills
+   the full container width — auto-fill still creates the "missing"
+   tracks up to whatever fits, and 1fr then stretches all of them
+   (populated or not) to consume that space, leaving no leftover width
+   for justify-content to center within. Flex with wrapping and a fixed
+   tile width does what's actually wanted here: N tiles at their natural
+   size, centered as a group, wrapping to a second row only past N. */
+#groupGrid.group-grid-centered { display: flex; flex-wrap: wrap; justify-content: center; }
+#groupGrid.group-grid-centered .item-card { width: var(--thumb-w, 165px); flex: 0 0 auto; }
 .item-grid[hidden] { display: none; }
 
 .shelf { margin-bottom: var(--space-8); }
@@ -128,4 +141,52 @@
 .pagination .page-indicator {
   min-width: 56px; text-align: center; font-family: var(--font-heading); font-weight: 700;
   font-size: 13px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-surface-raised);
+}
+
+/* Mobile navigation: the burger button, the drawer that receives
+   #typeTabs and .sidebar (moved there by JS — see library.js's
+   updateMobileNavLayout — not duplicated, so every existing click
+   handler on them keeps working with zero extra wiring), and the
+   backdrop behind it. Placed at the very end of this file on purpose —
+   see the earlier fix to .sidebar/.app-body above, which broke for
+   months because its media query sat *before* the rule it was meant to
+   override and lost every equal-specificity tie to it. Nothing here
+   should ever move above the rules it touches.
+*/
+.mobile-menu-btn {
+  display: none; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: var(--radius-md);
+  background: transparent; border: none; color: inherit; cursor: pointer; flex-shrink: 0;
+}
+.mobile-menu-btn:hover { background: color-mix(in srgb, var(--color-nav-text) 12%, transparent); }
+
+.mobile-nav-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
+
+.mobile-nav-drawer {
+  display: none; position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 84vw);
+  background: var(--color-bg); z-index: 40; overflow-y: auto; padding: var(--space-4) var(--space-3);
+  box-shadow: var(--shadow-lg);
+}
+/* #typeTabs and .sidebar, once moved in here by JS, just stack as
+   ordinary flow children — no fixed-position arithmetic needed since
+   they're genuinely inside this scrollable column now, not floating
+   independently on top of the page.
+   #typeTabs specifically needs an ID-based override (#mobileNavDrawer
+   #typeTabs, not just a class combinator) — its own hide rule below is
+   ID-based (#typeTabs { display: none }), and an ID always outranks any
+   number of classes regardless of which comes later in the file; a
+   class-only override here would have silently lost to it, the same
+   mistake as the .sidebar bug above but the other way round. */
+#mobileNavDrawer #typeTabs { display: flex; flex-direction: column; border: none; margin-bottom: var(--space-4); }
+.mobile-nav-drawer .seg-opt { justify-content: flex-start; border-radius: var(--radius-md); padding: 11px 12px; }
+.mobile-nav-drawer .seg-opt + .seg-opt { border-left: none; margin-top: 2px; }
+.mobile-nav-drawer .sidebar { display: flex; position: static; max-height: none; padding: 0; border-right: none; }
+
+@media (max-width: 760px) {
+  .app-body { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  #typeTabs { display: none; }
+  .mobile-menu-btn { display: flex; }
+  .mobile-nav-open .mobile-nav-backdrop { display: block; }
+  .mobile-nav-open .mobile-nav-drawer { display: block; }
 }

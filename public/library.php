@@ -27,6 +27,9 @@ Auth::requireReaderPage();
     <a href="#" class="nav-home-btn" id="homeBtn" title="<?= htmlspecialchars(t('nav.home')) ?>" aria-label="<?= htmlspecialchars(t('nav.home')) ?>">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg>
     </a>
+    <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="<?= htmlspecialchars(t('library.menu')) ?>" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
     <div class="seg" id="typeTabs"></div>
     <div class="search-box">
       <input class="input" type="search" id="searchInput" placeholder="<?= htmlspecialchars(t('nav.search_placeholder')) ?>" />
@@ -38,6 +41,9 @@ Auth::requireReaderPage();
       </button>
     </div>
   </nav>
+
+  <div class="mobile-nav-backdrop" id="mobileNavBackdrop" hidden></div>
+  <div class="mobile-nav-drawer" id="mobileNavDrawer" hidden></div>
 
   <div class="app-body">
     <aside class="sidebar">
@@ -93,6 +99,8 @@ Auth::requireReaderPage();
           <button type="button" class="btn btn-ghost" id="browseBackBtn" hidden><?= htmlspecialchars(t('library.back')) ?></button>
           <div class="active-filters" id="activeFilters"></div>
           <select class="input" id="sortSelect" style="width:auto;">
+            <option value="filename:ASC"><?= htmlspecialchars(t('library.sort_filename_asc')) ?></option>
+            <option value="filename:DESC"><?= htmlspecialchars(t('library.sort_filename_desc')) ?></option>
             <option value="added_at:DESC"><?= htmlspecialchars(t('library.sort_added_desc')) ?></option>
             <option value="added_at:ASC"><?= htmlspecialchars(t('library.sort_added_asc')) ?></option>
             <option value="title:ASC"><?= htmlspecialchars(t('library.sort_title_asc')) ?></option>
