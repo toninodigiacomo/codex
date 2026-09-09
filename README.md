@@ -9,9 +9,9 @@ A personal ebook/comic library server (Ubooquity-style), running on `php:8.2-apa
 
 ## Database
 This project uses **SQLite** (`data/codex.sqlite`) - the scale (potentially thousands of auto-indexed items, not a hand-curated list), the relational shape (tags, series, per-user reading progress and favorites), and search/filter needs all fit SQL far better than flat files or array filtering would.  
-Still no separate database server or container: it's one file, opened directly by PHP's `PDO`, bind-mounted like `data/` always was.
+Still no separate database server or container: it's one file, opened directly by PHP's `PDO`, bind-mounted like `data/` always was.  
 **Futur improvment:**
-- Connect to an external DB (MariaDB) container 
+**- Connect to an external DB (MariaDB) container** 
 
 `src/schema.sql` is the single source of truth for the structure, applied idempotently on every request by `src/Database.php` (`CREATE TABLE IF NOT EXISTS` everywhere - no separate migration history file; see "Schema migrations" below for how an existing database picks up a later change).
 
@@ -329,4 +329,4 @@ The container also checks for `pdo_sqlite`, `simplexml`, `poppler-utils` (PDF re
 **None of these checks can block Apache from starting** - each step in the startup command is independent (`|| true` / `|| echo 'WARN: ...'` rather than a single `&&`-chained pipeline), and the final step is `exec apache2-foreground`.  
 
 ## License
-**MIT** [LICENCE.md](https://github.com/toninodigiacomo/pong-led-matrix/blob/f3098bfc4be7f9d33e8b683e3e7f83d1b701de16/LICENSE.md)
+**GNU GPL v3.0** [LICENCE.md](https://github.com/toninodigiacomo/codex/blob/ced88567378bde78b3d0e61ee955449f240510e1/LICENSE.md)
