@@ -24,10 +24,11 @@ $invitedUser = $token !== '' ? Users::findByInviteToken($token) : null;
 if (!$invitedUser) {
     http_response_code(410);
     ?>
-    <!DOCTYPE html><html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>"><head><meta charset="UTF-8"><title><?= htmlspecialchars(t('invite.invalid_title')) ?></title>
-    <link rel="stylesheet" href="<?= asset('css/style.css') ?>"></head><body style="max-width:480px;margin:60px auto;padding:0 20px;">
+    <!DOCTYPE html><html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>"><head><meta charset="UTF-8"><link rel="icon" type="image/x-icon" href="<?= asset('favicon.ico') ?>" /><title><?= htmlspecialchars(t('invite.invalid_title')) ?></title>
+    <link rel="stylesheet" href="<?= asset('css/style.css') ?>"></head><body style="max-width:480px;margin:60px auto;padding:0 20px calc(20px + var(--footer-h));">
     <h1><?= htmlspecialchars(t('invite.invalid_heading')) ?></h1>
     <p class="text-muted"><?= htmlspecialchars(t('invite.invalid_body')) ?></p>
+    <?= Theme::footerHtml() ?>
     </body></html>
     <?php
     exit;
@@ -72,11 +73,16 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/x-icon" href="<?= asset("favicon.ico") ?>" />
+<link rel="icon" type="image/png" sizes="32x32" href="<?= asset("assets/icons/favicon-32x32.png") ?>" />
+<link rel="icon" type="image/png" sizes="16x16" href="<?= asset("assets/icons/favicon-16x16.png") ?>" />
+<link rel="apple-touch-icon" sizes="180x180" href="<?= asset("assets/icons/apple-touch-icon.png") ?>" />
+<link rel="manifest" href="<?= asset("site.webmanifest") ?>" />
 <title><?= htmlspecialchars(t('invite.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
-  .setup-wrap { max-width: 480px; margin: 0 auto; padding: 48px 20px 64px; }
+  .setup-wrap { max-width: 480px; margin: 0 auto; padding: 48px 20px calc(64px + var(--footer-h)); }
   .setup-wrap h1 { font-size: 26px; margin-bottom: 4px; }
   .setup-wrap .lead { margin-bottom: 28px; }
   .setup-card { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px 26px; margin-bottom: 20px; box-shadow: var(--shadow-sm); }
@@ -180,5 +186,6 @@ $uri = Totp::provisioningUri($secret, $invitedUser['username'], $issuer);
   });
 </script>
 
+<?= Theme::footerHtml() ?>
 </body>
 </html>

@@ -15,6 +15,11 @@ Auth::requireReaderPage();
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/x-icon" href="<?= asset("favicon.ico") ?>" />
+<link rel="icon" type="image/png" sizes="32x32" href="<?= asset("assets/icons/favicon-32x32.png") ?>" />
+<link rel="icon" type="image/png" sizes="16x16" href="<?= asset("assets/icons/favicon-16x16.png") ?>" />
+<link rel="apple-touch-icon" sizes="180x180" href="<?= asset("assets/icons/apple-touch-icon.png") ?>" />
+<link rel="manifest" href="<?= asset("site.webmanifest") ?>" />
 <title><?= htmlspecialchars(t('library.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <link rel="stylesheet" href="<?= asset('css/library.css') ?>" />
@@ -133,5 +138,6 @@ Auth::requireReaderPage();
 <script src="<?= asset('js/account.js') ?>"></script>
 <script src="<?= asset('js/library.js') ?>"></script>
 
+<?= Theme::footerHtml() ?>
 </body>
 </html>

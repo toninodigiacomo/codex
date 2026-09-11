@@ -139,9 +139,40 @@
     return esc(item.publisher || '');
   }
 
+  /**
+   * A compact snapshot of "where the user currently is" — attached to
+   * every item link (see itemCardHtml below) so item.php's own "←
+   * Bibliothèque" link can send them back to this exact spot instead of
+   * always landing on the home page. Deliberately just the state fields
+   * that matter for re-entering a view, not the whole `state` object
+   * (grid-density/pagination-derived stuff like groupItemsPage still
+   * matters, but there's no reason to carry along things loadItems()
+   * recomputes on its own, like the fetched item list itself).
+   */
+  function backContext() {
+    return JSON.stringify({
+      mode: state.mode,
+      type: state.type,
+      library_id: state.library_id,
+      series_id: state.series_id,
+      tag_id: state.tag_id,
+      favorites: state.favorites,
+      q: state.q,
+      sort: state.sort,
+      dir: state.dir,
+      page: state.page,
+      groupLevel: state.groupLevel,
+      groupLibraryId: state.groupLibraryId,
+      groupLibraryName: state.groupLibraryName,
+      groupSkippedLibraryLevel: state.groupSkippedLibraryLevel,
+      groupPath: state.groupPath,
+      groupItemsPage: state.groupItemsPage,
+    });
+  }
+
   function itemCardHtml(item) {
     return `
-      <a class="item-card" href="item.php?id=${esc(item.id)}">
+      <a class="item-card" href="item.php?id=${esc(item.id)}&back=${encodeURIComponent(backContext())}">
         <div class="item-cover">
           <span class="type-chip">${esc(TYPE_LABEL_KEYS[item.type] ? t(TYPE_LABEL_KEYS[item.type]) : item.type)}</span>
           ${coverMarkup(item)}
@@ -282,6 +313,7 @@
         state.page = 1;
         loadItems();
         syncSidebarActiveStates();
+        pushHistoryState();
       });
     });
   }
@@ -315,6 +347,7 @@
         document.getElementById('favoritesTab').checked = false;
         loadItems();
         syncSidebarActiveStates();
+        pushHistoryState();
       });
     });
   }
@@ -404,6 +437,7 @@
     renderPaginationInto(pagination, state.page, total, (next) => {
       state.page = next;
       loadItems();
+      pushHistoryState();
     });
   }
 
@@ -446,6 +480,7 @@
           state.groupLibraryId = null;
           state.groupPath = null;
           loadItems();
+          pushHistoryState();
         }
       });
     });
@@ -467,6 +502,7 @@
       }
       loadItems();
       syncSidebarActiveStates();
+      pushHistoryState();
     });
   }
 
@@ -501,21 +537,21 @@
   }
 
   /** Arrow click: skips straight to the éditeur grid when the type has only one library, per admin's confirmed behaviour. */
-  async function startGroupFlow(type) {
+  async function startGroupFlow(type, skipPush) {
     try {
       const libs = await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`);
       if (libs.length === 1) {
-        openPathLevel(type, libs[0].id, libs[0].name, [], true);
+        openPathLevel(type, libs[0].id, libs[0].name, [], true, 1, skipPush);
       } else {
-        openLibraryLevel(type, libs);
+        openLibraryLevel(type, libs, skipPush);
       }
     } catch (err) {
-      openLibraryLevel(type, []);
+      openLibraryLevel(type, [], skipPush);
     }
   }
 
   /** First tile grid: one tile per library of $type (never merged, even when two libraries share a type). */
-  async function openLibraryLevel(type, preloaded) {
+  async function openLibraryLevel(type, preloaded, skipPush) {
     state.mode = 'group';
     state.type = type;
     state.groupLevel = 'library';
@@ -524,6 +560,7 @@
     state.groupSkippedLibraryLevel = false;
     state.groupPath = null;
     showGroupView(t('library.sidebar_libraries'));
+    if (!skipPush) pushHistoryState();
 
     try {
       const groups = preloaded || (await fetchJson(`/api/library-groups?type=${encodeURIComponent(type)}`));
@@ -556,8 +593,16 @@
    * them can, though (a big éditeur's loose one-shots), so that part
    * pages independently via state.groupItemsPage; the subfolder tiles
    * stay pinned at the top of every page.
+   *
+   * $skipPush: true only when applyContext() itself is calling this to
+   * restore a saved view (the initial ?restore= link, or a popstate) —
+   * every *user-initiated* call (a tile click, pagination, the arrow from
+   * startGroupFlow) leaves it false so pushHistoryState() below records a
+   * real history entry, the whole point being that the browser's own
+   * Back button can step back through these the same way item.php's own
+   * link already could.
    */
-  async function openPathLevel(type, libraryId, libraryName, path, skippedLibraryLevel, itemsPage) {
+  async function openPathLevel(type, libraryId, libraryName, path, skippedLibraryLevel, itemsPage, skipPush) {
     state.mode = 'group';
     state.type = type;
     state.groupLevel = 'path';
@@ -572,6 +617,7 @@
     // the request and visibly swap out once it resolves, which reads as a
     // glitch more than a loading state (same fix as loadItems').
     showGroupView(path.length ? t('library.collections_title', { name: path[path.length - 1] }) : t('library.editors_title', { name: libraryName }));
+    if (!skipPush) pushHistoryState();
 
     const pathQuery = encodeURIComponent(JSON.stringify(path));
     const baseParams = `type=${encodeURIComponent(type)}&library_id=${encodeURIComponent(libraryId)}&path=${pathQuery}`;
@@ -600,6 +646,7 @@
     }
   }
 
+  /** Only ever reached from openPathLevel's own leaf-folder fallback right above — that call already pushed a history entry for this navigation moment, so this never pushes its own on top of it. */
   function openFilteredBrowse(type, libraryId, path) {
     switchToBrowseMode();
     state.type = type;
@@ -645,6 +692,7 @@
     groupView.hidden = true;
     homeView.hidden = false;
     loadHome();
+    pushHistoryState();
   }
 
   homeBtn.addEventListener('click', (e) => {
@@ -662,6 +710,7 @@
       state.q = q;
       state.page = 1;
       loadItems();
+      pushHistoryState();
     }, 250);
   });
 
@@ -671,6 +720,7 @@
     state.dir = dir;
     state.page = 1;
     loadItems();
+    pushHistoryState();
   });
 
   let resizeTimer = null;
@@ -759,6 +809,103 @@
     // Deferred until here rather than fired in parallel at the top of the
     // file: the home shelves' tile size and visible width both depend on
     // the CSS variables applyDisplaySettings just set.
+    restoreBackContextOrLoadHome();
+  });
+
+  /**
+   * item.php's own "← Bibliothèque" link forwards whatever backContext()
+   * attached to the link that got there (see itemCardHtml above) as
+   * library.php's own ?restore= param — landing back on the exact
+   * library/éditeur/browse view the item was opened from, rather than
+   * always resetting to the home page. Falls back to the normal home
+   * view for a plain library.php visit, or if the param is missing/
+   * malformed (an old bookmark, a manually-edited URL, ...).
+   */
+  /**
+   * Same snapshot shape as backContext() above, but as a parsed object
+   * rather than a JSON string — the one place that actually *enters* a
+   * saved state, used by both the initial-page-load restore (a ?restore=
+   * URL param, from item.php's back link) and the popstate handler below
+   * (the browser's own Back/Forward, once pushHistoryState() has been
+   * recording history entries as the user clicks around).
+   */
+  function applyContext(ctx) {
+    if (ctx.mode === 'group' && ctx.type) {
+      if (ctx.groupLevel === 'path') {
+        openPathLevel(ctx.type, ctx.groupLibraryId, ctx.groupLibraryName, ctx.groupPath || [], !!ctx.groupSkippedLibraryLevel, ctx.groupItemsPage || 1, true);
+      } else {
+        startGroupFlow(ctx.type, true);
+      }
+      return;
+    }
+    if (ctx.mode === 'browse') {
+      Object.assign(state, {
+        type: ctx.type || '',
+        library_id: ctx.library_id ?? null,
+        series_id: ctx.series_id ?? null,
+        tag_id: ctx.tag_id ?? null,
+        favorites: !!ctx.favorites,
+        q: ctx.q || '',
+        sort: ctx.sort || state.sort,
+        dir: ctx.dir || state.dir,
+        page: ctx.page || 1,
+        groupLibraryId: ctx.groupLibraryId ?? null,
+        groupPath: ctx.groupPath ?? null,
+      });
+      typeTabs.querySelectorAll('input[name="type"]').forEach((input) => { input.checked = input.value === state.type; });
+      const favoritesTab = document.getElementById('favoritesTab');
+      if (favoritesTab) favoritesTab.checked = state.favorites;
+      searchInput.value = state.q;
+      switchToBrowseMode();
+      syncSidebarActiveStates();
+      loadItems();
+      return;
+    }
     loadHome();
+  }
+
+  /**
+   * Records the current view as a browser history entry — called after
+   * every user-initiated navigation (type tabs, sidebar, group tiles,
+   * pagination, sort, search...) so the browser's own Back/Forward
+   * buttons step through the same views item.php's back link already
+   * knows how to restore, instead of leaving library.php's internal
+   * navigation invisible to browser history entirely. `history.state`
+   * carries the parsed context directly (popstate below reads it
+   * straight off the event, no re-fetch/re-parse needed); the URL's own
+   * ?restore= is kept in sync too, purely so a reload or a copied link
+   * lands back in the same spot.
+   * $skipPush is set by applyContext() itself while restoring — the
+   * response to a popstate, or the very first restore from item.php's
+   * link, must never immediately push ANOTHER entry on top of the one
+   * that got them there.
+   */
+  function pushHistoryState() {
+    const ctx = JSON.parse(backContext());
+    history.pushState(ctx, '', 'library.php?restore=' + encodeURIComponent(JSON.stringify(ctx)));
+  }
+
+  function restoreBackContextOrLoadHome() {
+    const raw = new URLSearchParams(window.location.search).get('restore');
+    if (!raw) {
+      loadHome();
+      return;
+    }
+    let ctx;
+    try {
+      ctx = JSON.parse(raw);
+    } catch {
+      loadHome();
+      return;
+    }
+    applyContext(ctx);
+  }
+
+  window.addEventListener('popstate', (e) => {
+    if (e.state) {
+      applyContext(e.state);
+    } else {
+      restoreBackContextOrLoadHome();
+    }
   });
 })();

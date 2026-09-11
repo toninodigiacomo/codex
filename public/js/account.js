@@ -102,7 +102,7 @@
             <a class="btn btn-secondary" href="logout.php">${esc(t('nav.logout'))}</a>
           </div>
           <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" id="accountCloseBtn">${esc(t('common.close'))}</button>
+            <button type="button" class="btn btn-secondary" id="accountCloseBtn">${esc(t('common.close'))}</button>
           </div>
         </div>`;
       document.body.appendChild(backdrop);

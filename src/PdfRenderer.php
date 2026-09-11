@@ -48,7 +48,7 @@ final class PdfRenderer
         return (int) $m[1];
     }
 
-    /** $pageIndex is 0-based; pdftoppm's own page numbering is 1-based. */
+    /** $pageIndex is 0-based; pdftoppm's own page numbering is 1-based. -cropbox renders the PDF's CropBox (the page's intended visible area) rather than its MediaBox (the full physical page) — without it, a PDF cropped in an authoring tool to trim unwanted white margins still rendered with those margins back in, since CropBox is purely a display-time clip that pdftoppm otherwise ignores by default. Affects both the reader (every page) and cover extraction (the first page), since both go through this one function. */
     public static function renderPage(string $absolutePath, int $pageIndex): ?string
     {
         if ($pageIndex < 0) {
@@ -63,7 +63,7 @@ final class PdfRenderer
 
         try {
             $result = self::run([
-                'pdftoppm', '-jpeg', '-f', $pageNumber, '-l', $pageNumber, '-r', (string) self::DPI,
+                'pdftoppm', '-jpeg', '-cropbox', '-f', $pageNumber, '-l', $pageNumber, '-r', (string) self::DPI,
                 $absolutePath, $tmpPrefix,
             ]);
             if ($result === null) {

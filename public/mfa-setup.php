@@ -53,11 +53,16 @@ $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/x-icon" href="<?= asset("favicon.ico") ?>" />
+<link rel="icon" type="image/png" sizes="32x32" href="<?= asset("assets/icons/favicon-32x32.png") ?>" />
+<link rel="icon" type="image/png" sizes="16x16" href="<?= asset("assets/icons/favicon-16x16.png") ?>" />
+<link rel="apple-touch-icon" sizes="180x180" href="<?= asset("assets/icons/apple-touch-icon.png") ?>" />
+<link rel="manifest" href="<?= asset("site.webmanifest") ?>" />
 <title><?= htmlspecialchars(t('mfa_setup.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
   body { margin: 0; }
-  .setup-wrap { max-width: 460px; margin: 0 auto; padding: 48px 20px 64px; }
+  .setup-wrap { max-width: 460px; margin: 0 auto; padding: 48px 20px calc(64px + var(--footer-h)); }
   .setup-wrap h1 { font-size: 24px; margin-bottom: 4px; }
   .setup-wrap .lead { margin-bottom: 28px; }
   .setup-card { background: var(--color-surface); border-radius: var(--radius-lg); padding: 24px 26px; box-shadow: var(--shadow-sm); }
@@ -113,5 +118,6 @@ $uri = Totp::provisioningUri($secret, $_SESSION['username'] ?? 'compte', $issuer
   document.getElementById('qrHolder').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 });
 </script>
 
+<?= Theme::footerHtml() ?>
 </body>
 </html>

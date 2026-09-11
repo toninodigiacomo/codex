@@ -21,7 +21,7 @@ require_once __DIR__ . '/Settings.php';
 final class Thumbnails
 {
     private const JPEG_QUALITY = 82;
-    private const MAX_SOURCE_PIXELS = 60_000_000; // ~ a 7700×7700 image — see the note in resize() below
+    private const MAX_SOURCE_PIXELS = 220_000_000; // ~ a 14800×14800 image — see the note in resize() below
 
     public static function available(): bool
     {
@@ -88,6 +88,24 @@ final class Thumbnails
             return null;
         }
 
+        // Real scanned comic covers can occasionally be enormous (a real
+        // one that prompted this: 10335×13787, ~142.5 MP) — this cap exists
+        // to catch these safely, not to reject them outright. GD's own
+        // truecolor buffer for the *decode* alone is ~4 bytes/pixel, plus
+        // meaningful additional overhead libjpeg needs while decoding
+        // (roughly another 1.5-2x on top of the final buffer size, in
+        // practice) — raising the PHP-wide memory_limit permanently for
+        // every request just to cover this one rare case would be the
+        // wrong trade-off. ini_set() only affects the current request, so
+        // this bump disappears again the moment this request ends; a
+        // request already running under a higher limit (set some other
+        // way) never gets lowered by this, since it only ever raises.
+        $neededBytes = (int) ($info[0] * $info[1] * 4 * 1.8) + 67_108_864;
+        $currentLimitBytes = self::iniBytes((string) ini_get('memory_limit'));
+        if ($currentLimitBytes > 0 && $currentLimitBytes < $neededBytes) {
+            @ini_set('memory_limit', (string) $neededBytes);
+        }
+
         $image = @imagecreatefromstring($imageData);
         if ($image === false) {
             return null;
@@ -126,5 +144,22 @@ final class Thumbnails
         $data = ob_get_clean();
         imagedestroy($image);
         return $written && $data !== false ? $data : null;
+    }
+
+    /** Parses a php.ini-style size string ("512M", "1G", "-1" for unlimited) into a byte count. Returns -1 unchanged for "unlimited" — the caller's own "$current < $needed" check already treats that as "always enough" without special-casing it. */
+    private static function iniBytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-1') {
+            return -1;
+        }
+        $unit = strtolower(substr($value, -1));
+        $number = (int) $value;
+        return match ($unit) {
+            'g' => $number * 1024 * 1024 * 1024,
+            'm' => $number * 1024 * 1024,
+            'k' => $number * 1024,
+            default => $number,
+        };
     }
 }

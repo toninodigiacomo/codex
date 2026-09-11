@@ -15,6 +15,11 @@ Auth::requireLogin(); // item management is administration, not browsing — adm
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/x-icon" href="<?= asset("favicon.ico") ?>" />
+<link rel="icon" type="image/png" sizes="32x32" href="<?= asset("assets/icons/favicon-32x32.png") ?>" />
+<link rel="icon" type="image/png" sizes="16x16" href="<?= asset("assets/icons/favicon-16x16.png") ?>" />
+<link rel="apple-touch-icon" sizes="180x180" href="<?= asset("assets/icons/apple-touch-icon.png") ?>" />
+<link rel="manifest" href="<?= asset("site.webmanifest") ?>" />
 <title><?= htmlspecialchars(t('item.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <link rel="stylesheet" href="<?= asset('css/library.css') ?>" />
@@ -25,7 +30,11 @@ Auth::requireLogin(); // item management is administration, not browsing — adm
 <div class="app-shell">
   <nav class="nav topbar">
     <a href="library.php" class="nav-brand" style="text-decoration:none;">Codex</a>
-    <a href="library.php" class="btn btn-ghost"><?= htmlspecialchars(t('nav.library')) ?></a>
+<?php
+$backContext = isset($_GET['back']) ? (string) $_GET['back'] : '';
+$backHref = $backContext !== '' ? 'library.php?restore=' . urlencode($backContext) : 'library.php';
+?>
+    <a href="<?= htmlspecialchars($backHref) ?>" class="btn btn-ghost"><?= htmlspecialchars(t('nav.library')) ?></a>
   </nav>
 
   <main class="item-page" id="itemPage" data-user-role="<?= htmlspecialchars($_SESSION['role'] ?? '') ?>">
@@ -37,5 +46,6 @@ Auth::requireLogin(); // item management is administration, not browsing — adm
 <script src="<?= asset('js/i18n.js') ?>"></script>
 <script src="<?= asset('js/item.js') ?>"></script>
 
+<?= Theme::footerHtml() ?>
 </body>
 </html>

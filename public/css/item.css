@@ -1,4 +1,4 @@
-.item-page { width: 100%; max-width: 920px; margin: 0 auto; padding: var(--space-6) var(--space-4) var(--space-8); }
+.item-page { width: 100%; max-width: 920px; margin: 0 auto; padding: var(--space-6) var(--space-4) calc(var(--space-8) + var(--footer-h)); }
 .item-head { display: flex; gap: var(--space-6); margin-bottom: var(--space-6); flex-wrap: wrap; --cover-height: 300px; }
 .item-cover-lg {
   width: 230px; height: var(--cover-height); flex-shrink: 0; background: var(--color-surface);

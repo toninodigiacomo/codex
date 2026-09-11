@@ -1,4 +1,4 @@
-.admin-main { max-width: 880px; margin: 0 auto; padding: var(--space-6) var(--space-4) var(--space-8); }
+.admin-main { max-width: 880px; margin: 0 auto; padding: var(--space-6) var(--space-4) calc(var(--space-8) + var(--footer-h)); }
 .admin-tabs { display: flex; gap: 8px; margin-bottom: var(--space-6); flex-wrap: wrap; }
 .admin-tab {
   font-family: var(--font-heading); font-weight: 700; font-size: 13.5px;
@@ -22,7 +22,10 @@
 .admin-card-head h2 { margin-bottom: 0; }
 .sync-result { width: 100%; margin-top: 8px; }
 .sync-result:empty { display: none; }
-.orphan-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 12.5px; border-top: 1px solid var(--color-divider); margin-top: 6px; }
+.orphan-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12.5px; border-top: 1px solid var(--color-divider); margin-top: 6px; }
+label.orphan-row { cursor: pointer; }
+.orphan-row input[type="checkbox"] { width: auto; flex-shrink: 0; }
+.orphan-row-header { font-weight: 700; }
 
 .admin-list { display: flex; flex-direction: column; gap: 8px; }
 .admin-row {
@@ -87,3 +90,11 @@
 }
 .toast[hidden] { display: none; }
 .toast.error { background: #5c1414; color: #ffb3b3; }
+
+/* Utilisateurs row actions — role select, Bibliothèques..., Exiger le MFA,
+   Renvoyer, Supprimer — a shared min-width so they read as one aligned
+   row of controls instead of each sized to its own label's length
+   ("Lever l'exigence MFA" is meaningfully longer than "Exiger le MFA",
+   so this has to fit the longer of the two, not just look right for
+   whichever happens to be showing at the moment). */
+.user-row-action { min-width: 150px; width: auto; justify-content: center; text-align: center; }

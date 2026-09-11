@@ -220,15 +220,15 @@
         <div class="admin-row-actions">
           ${
             u.id !== currentUserId
-              ? `<select class="input" data-change-role="${u.id}" style="width:auto;padding:6px 10px;font-size:12.5px;">
+              ? `<select class="input user-row-action" data-change-role="${u.id}" style="font-size:12.5px;">
                   ${Object.entries(ROLE_LABELS).map(([val, label]) => `<option value="${val}" ${u.role === val ? 'selected' : ''}>${esc(label)}</option>`).join('')}
                 </select>`
               : ''
           }
-          ${isReaderTier ? `<button class="btn btn-secondary btn-sm" data-edit-access="${u.id}">${esc(t('admin.libraries_ellipsis'))}</button>` : ''}
-          <button class="btn btn-secondary btn-sm" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? esc(t('admin.lift_mfa_requirement')) : esc(t('admin.require_mfa_short'))}</button>
-          ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm" data-resend="${u.id}">${esc(t('admin.resend'))}</button>` : ''}
-          ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm" data-delete-user="${u.id}">${esc(t('common.delete'))}</button>` : ''}
+          ${isReaderTier ? `<button class="btn btn-secondary btn-sm user-row-action" data-edit-access="${u.id}">${esc(t('admin.libraries_ellipsis'))}</button>` : ''}
+          <button class="btn btn-secondary btn-sm user-row-action" data-toggle-mfa="${u.id}" data-current="${u.mfa_required ? '1' : '0'}">${u.mfa_required ? esc(t('admin.lift_mfa_requirement')) : esc(t('admin.require_mfa_short'))}</button>
+          ${u.status === 'invited' ? `<button class="btn btn-secondary btn-sm user-row-action" data-resend="${u.id}">${esc(t('admin.resend'))}</button>` : ''}
+          ${u.id !== currentUserId ? `<button class="btn btn-danger btn-sm user-row-action" data-delete-user="${u.id}">${esc(t('common.delete'))}</button>` : ''}
         </div>
       </div>`;
       })
@@ -541,6 +541,7 @@
   function renderJobStatus(libId, job) {
     const box = document.getElementById(`sync-result-${libId}`);
     if (!box || !job) return;
+    if (box.dataset.protected === '1') return; // an unresolved orphan-files list is showing — see renderSyncResult
     const typeLabelKeys = { sync: 'admin.job_sync', 'extract-missing': 'admin.job_extract', 'regenerate-covers': 'admin.job_regenerate' };
     const label = typeLabelKeys[job.job_type] ? t(typeLabelKeys[job.job_type]) : job.job_type;
     const progress = job.total ? `${job.done} / ${job.total}` : `${job.done}`;
@@ -941,12 +942,19 @@
   }
 
   function renderSyncResult(box, res) {
+    // Marks this box as holding an unresolved, actionable result (orphan
+    // files with checkboxes to select for deletion) — startJobPolling()
+    // below checks this before overwriting anything, since the sync job
+    // itself is already "done" server-side by the time this renders, and
+    // the very next poll tick (every 2s) would otherwise wipe this out
+    // from under whoever's about to check a box.
+    box.dataset.protected = res.orphaned.length ? '1' : '';
     const orphanRows = res.orphaned
       .map(
-        (o) => `<div class="orphan-row">
+        (o) => `<label class="orphan-row">
+          <input type="checkbox" class="orphan-check" value="${o.id}" />
           <span>${esc(o.title)} <span class="text-muted">(${esc(o.path)})</span></span>
-          <button class="btn btn-danger btn-sm" data-delete-orphan="${o.id}">${esc(t('common.delete'))}</button>
-        </div>`
+        </label>`
       )
       .join('');
     const conflicted = res.conflicted || [];
@@ -954,7 +962,16 @@
     box.innerHTML = `
       <div class="invite-link-box">
         ${t('admin.sync_result_summary', { added: res.added, updated: res.updated || 0, unchanged: res.unchanged, orphaned: res.orphaned.length ? ', ' + t('admin.files_not_found', { count: res.orphaned.length }) : '.' })}
-        ${orphanRows}
+        ${
+          res.orphaned.length
+            ? `<label class="orphan-row orphan-row-header">
+                <input type="checkbox" id="orphanSelectAll-${box.id}" />
+                <span>${esc(t('admin.select_all'))}</span>
+              </label>
+              ${orphanRows}
+              <button type="button" class="btn btn-danger btn-sm" id="orphanBulkDelete-${box.id}" disabled>${esc(t('common.delete'))}</button>`
+            : ''
+        }
       </div>
       ${
         conflicted.length
@@ -964,16 +981,47 @@
             </div>`
           : ''
       }`;
-    box.querySelectorAll('[data-delete-orphan]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+
+    if (!res.orphaned.length) return;
+
+    const checks = () => Array.from(box.querySelectorAll('.orphan-check'));
+    const selectAll = document.getElementById(`orphanSelectAll-${box.id}`);
+    const bulkBtn = document.getElementById(`orphanBulkDelete-${box.id}`);
+
+    function syncBulkBtn() {
+      const selected = checks().filter((c) => c.checked);
+      bulkBtn.disabled = selected.length === 0;
+      bulkBtn.textContent = selected.length ? t('admin.delete_n_items', { count: selected.length }) : t('common.delete');
+      selectAll.checked = selected.length > 0 && selected.length === checks().length;
+      selectAll.indeterminate = selected.length > 0 && selected.length < checks().length;
+    }
+    selectAll.addEventListener('change', () => {
+      checks().forEach((c) => { c.checked = selectAll.checked; });
+      syncBulkBtn();
+    });
+    box.addEventListener('change', (e) => {
+      if (e.target.classList.contains('orphan-check')) syncBulkBtn();
+    });
+    bulkBtn.addEventListener('click', async () => {
+      const selected = checks().filter((c) => c.checked);
+      if (!selected.length || !confirm(t('admin.confirm_delete_orphaned', { count: selected.length }))) return;
+      bulkBtn.disabled = true;
+      let deleted = 0;
+      for (const c of selected) {
         try {
-          await api('DELETE', `/api/items/${btn.dataset.deleteOrphan}`);
-          btn.closest('.orphan-row').remove();
-          showToast(t('admin.item_deleted'));
+          await api('DELETE', `/api/items/${c.value}`);
+          c.closest('.orphan-row').remove();
+          deleted++;
         } catch (err) {
           showToast(err.message, true);
         }
-      });
+      }
+      showToast(t('admin.items_deleted', { count: deleted }));
+      if (!box.querySelector('.orphan-check')) {
+        box.dataset.protected = '';
+      } else {
+        syncBulkBtn();
+      }
     });
   }
 
@@ -989,9 +1037,12 @@
         <div class="admin-card">
           <h2>${esc(t('settings.appearance'))}</h2>
           <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('settings.appearance_hint'))}</p>
-          <div style="display:flex;gap:8px;">
-            <button type="button" class="btn ${s.theme !== 'light' ? 'btn-primary' : 'btn-secondary'}" id="themeDarkBtn">${esc(t('settings.theme_dark'))}</button>
-            <button type="button" class="btn ${s.theme === 'light' ? 'btn-primary' : 'btn-secondary'}" id="themeLightBtn">${esc(t('settings.theme_light'))}</button>
+          <div class="field" style="max-width:260px;">
+            <label for="themeSelect">${esc(t('settings.theme'))}</label>
+            <select class="input" id="themeSelect">
+              <option value="dark" ${s.theme !== 'light' ? 'selected' : ''}>${esc(t('settings.theme_dark'))}</option>
+              <option value="light" ${s.theme === 'light' ? 'selected' : ''}>${esc(t('settings.theme_light'))}</option>
+            </select>
           </div>
         </div>
         <div class="admin-card">
@@ -1142,8 +1193,7 @@
           showToast(err.message, true);
         }
       }
-      document.getElementById('themeDarkBtn').addEventListener('click', () => setTheme('dark'));
-      document.getElementById('themeLightBtn').addEventListener('click', () => setTheme('light'));
+      document.getElementById('themeSelect').addEventListener('change', (e) => setTheme(e.target.value));
 
       document.getElementById('thumbnailWidthSlider').addEventListener('input', (e) => {
         const w = Number(e.target.value);

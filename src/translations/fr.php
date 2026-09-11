@@ -77,7 +77,7 @@ return [
     // --- mfa-setup.php ---
     'mfa_setup.title' => 'Authentification à deux facteurs requise — Codex',
     'mfa_setup.heading' => 'Authentification à deux facteurs requise',
-    'mfa_setup.lead' => "L'administrateur exige la MFA sur ce compte. Configure-la pour continuer — ton mot de passe est déjà validé.",
+    'mfa_setup.lead' => "L'administrateur exige le MFA sur ce compte. Configure-le pour continuer — ton mot de passe est déjà validé.",
     'mfa_setup.error_invalid_code' => "Code invalide. Vérifie l'heure de ton téléphone et réessaie.",
     'mfa_setup.activate_continue' => 'Activer et continuer',
 
@@ -100,6 +100,7 @@ return [
     'library.sort_filename_asc' => 'Nom du fichier (A→Z)',
     'library.sort_filename_desc' => 'Nom du fichier (Z→A)',
     'library.menu' => 'Menu',
+    'footer.line' => "Propulsé par {link} — Thème {theme} — © Vektoriel",
     'library.empty_browse' => 'Aucun résultat. La bibliothèque est-elle déjà indexée ?',
     'library.empty_group' => 'Aucun résultat.',
     'library.chip_favorites' => 'Favoris',
@@ -219,8 +220,9 @@ return [
     'account.verifying' => 'Vérification...',
     'settings.appearance' => 'Apparence',
     'settings.appearance_hint' => "S'applique à tout le monde — chaque visiteur voit le même thème, y compris sur la page de connexion.",
-    'settings.theme_dark' => 'Sombre',
-    'settings.theme_light' => 'Clair',
+    'settings.theme_dark' => 'Codex',
+    'settings.theme_light' => 'ComiXology',
+    'settings.theme' => 'Thème',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',
@@ -256,7 +258,7 @@ return [
     'admin.no_access' => 'Aucun accès',
     'admin.libraries_ellipsis' => 'Bibliothèques...',
     'admin.lift_mfa_requirement' => "Lever l'exigence MFA",
-    'admin.require_mfa_short' => 'Exiger la MFA',
+    'admin.require_mfa_short' => 'Exiger le MFA',
     'admin.resend' => 'Renvoyer',
     'common.delete' => 'Supprimer',
     'admin.role_updated' => 'Rôle mis à jour.',
@@ -355,6 +357,7 @@ return [
     'admin.files_not_found' => '{count} fichier(s) introuvable(s) :',
     'admin.files_skipped_duplicate' => '{count} fichier(s) ignoré(s) — déjà indexé(s) sous une autre bibliothèque (chemin en doublon) :',
     'admin.item_deleted' => 'Fiche supprimée.',
+    'admin.select_all' => 'Tout sélectionner',
 
     // --- Réglages ---
     'settings.thumbnails' => 'Miniatures',

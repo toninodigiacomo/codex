@@ -57,6 +57,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/x-icon" href="<?= asset("favicon.ico") ?>" />
+<link rel="icon" type="image/png" sizes="32x32" href="<?= asset("assets/icons/favicon-32x32.png") ?>" />
+<link rel="icon" type="image/png" sizes="16x16" href="<?= asset("assets/icons/favicon-16x16.png") ?>" />
+<link rel="apple-touch-icon" sizes="180x180" href="<?= asset("assets/icons/apple-touch-icon.png") ?>" />
+<link rel="manifest" href="<?= asset("site.webmanifest") ?>" />
 <title><?= htmlspecialchars(t('login.title')) ?></title>
 <link rel="stylesheet" href="<?= asset('css/style.css') ?>" />
 <style>
@@ -90,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   .spec-row .k { opacity: 0.5; letter-spacing: 0.08em; text-transform: uppercase; font-size: 9.5px; font-weight: 600; }
   .spec-row .v { font-family: var(--font-heading); font-weight: 700; font-size: 15px; margin-top: 3px; }
 
-  .form-side { display: flex; align-items: center; justify-content: center; padding: 40px 36px; }
+  .form-side { display: flex; align-items: center; justify-content: center; padding: 40px 36px calc(40px + var(--footer-h)); }
   .form-wrap { width: 100%; max-width: 352px; }
   .step-label { margin: 0 0 10px; color: var(--color-accent); font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
   .form-wrap h2 { margin: 0 0 6px; }
@@ -200,5 +205,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   });
 </script>
 
+<?= Theme::footerHtml() ?>
 </body>
 </html>

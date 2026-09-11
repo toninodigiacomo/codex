@@ -7,6 +7,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
 :root {
+  --footer-h: 42px; /* .app-footer's own rendered height — pages with a fixed bottom bar reserve this much space so it never covers their last bit of content; kept as one shared value rather than guessed separately per page */
   --color-bg: #0e0e10;
   --color-surface: #1a1a1d;
   --color-surface-raised: #232326;
@@ -190,6 +191,7 @@ figcaption { font-size: 11px; margin-top: var(--space-1); color: color-mix(in sr
 .btn-primary { background: var(--color-accent); color: #fff; }
 .btn-primary:hover { background: var(--color-accent-400); }
 .btn-primary:active { background: var(--color-accent-600); transform: scale(0.98); }
+.btn-secondary { background: var(--color-surface-raised); border: 1px solid var(--color-divider); }
 .btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 10%, var(--color-surface-raised)); }
 .btn-secondary:active { background: color-mix(in srgb, var(--color-text) 16%, var(--color-surface-raised)); }
 .btn-ghost { background: transparent; color: var(--color-accent); padding-inline: var(--space-2); }
@@ -302,3 +304,13 @@ textarea.input { min-height: 90px; resize: vertical; }
 .account-error { color: #ff6b6b; font-size: 13px; margin-top: 6px; }
 .account-success { color: #7be3ab; font-size: 13px; margin-top: 6px; }
 .account-code-input { font-family: monospace; letter-spacing: 0.15em; font-size: 16px; text-align: center; }
+
+.app-footer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  background: var(--color-bg);
+  text-align: center; font-size: 12px; padding: 10px var(--space-4);
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  border-top: 1px solid var(--color-divider);
+}
+.app-footer a { color: inherit; text-decoration: underline; }
+.app-footer a:hover { color: var(--color-accent); }

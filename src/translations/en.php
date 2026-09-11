@@ -99,6 +99,7 @@ return [
     'library.sort_filename_asc' => 'File name (A→Z)',
     'library.sort_filename_desc' => 'File name (Z→A)',
     'library.menu' => 'Menu',
+    'footer.line' => "Powered by {link} — {theme} theme — © Vektoriel",
     'library.empty_browse' => 'No results. Has the library been indexed yet?',
     'library.empty_group' => 'No results.',
     'library.chip_favorites' => 'Favorites',
@@ -218,8 +219,9 @@ return [
     'account.verifying' => 'Verifying...',
     'settings.appearance' => 'Appearance',
     'settings.appearance_hint' => 'Applies to everyone — every visitor sees the same theme, including on the login page.',
-    'settings.theme_dark' => 'Dark',
-    'settings.theme_light' => 'Light',
+    'settings.theme_dark' => 'Codex',
+    'settings.theme_light' => 'ComiXology',
+    'settings.theme' => 'Theme',
 
     // --- admin.php ---
     'admin.title' => 'Administration — Codex',
@@ -354,6 +356,7 @@ return [
     'admin.files_not_found' => '{count} file(s) not found:',
     'admin.files_skipped_duplicate' => '{count} file(s) skipped — already indexed under another library (duplicate path):',
     'admin.item_deleted' => 'Item deleted.',
+    'admin.select_all' => 'Select all',
 
     // --- Settings ---
     'settings.thumbnails' => 'Thumbnails',

@@ -9,16 +9,25 @@
 .nav-home-btn {
   display: flex; align-items: center; justify-content: center; width: 34px; height: 34px;
   border-radius: var(--radius-md); background: var(--color-accent); color: #fff;
-  flex-shrink: 0; transition: opacity 0.15s;
+  flex-shrink: 0; transition: background 0.15s;
 }
-.nav-home-btn:hover { opacity: 0.85; }
+/* A solid darker shade, not opacity — opacity would fade the white icon
+   right along with the background, which is exactly what made it nearly
+   disappear on hover instead of standing out.
+   Specificity note: style.css's generic `.nav a:hover { color: ... }`
+   (a class + element + pseudo-class) outranks a plain `.nav-home-btn:hover`
+   override (class + pseudo-class only) — the icon kept losing its white
+   color to that rule regardless of what was written here. `.nav
+   a.nav-home-btn:hover` matches that same shape (class + element + class
+   + pseudo-class) plus one more class, so it wins outright. */
+.nav a.nav-home-btn:hover { background: var(--color-accent-600); color: #fff; }
 
 .app-body { flex: 1; display: grid; grid-template-columns: 232px 1fr; }
 
 .sidebar {
   border-right: 1px solid var(--color-divider); padding: var(--space-4) var(--space-3);
   display: flex; flex-direction: column; gap: var(--space-6); align-self: start;
-  position: sticky; top: 66px; max-height: calc(100vh - 66px); overflow-y: auto;
+  position: sticky; top: 66px; max-height: calc(100vh - 66px - var(--footer-h)); overflow-y: auto;
 }
 .side-section h6 { margin: 0 0 var(--space-2); color: var(--color-accent); font-weight: 700; }
 .side-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -33,7 +42,7 @@
 .side-list li a.active .count { opacity: 0.9; }
 .side-empty { font-size: 12px; color: color-mix(in srgb, var(--color-text) 45%, transparent); font-style: italic; padding: 7px 10px; }
 
-.main-area { padding: var(--space-4) var(--space-6); min-width: 0; }
+.main-area { padding: var(--space-4) var(--space-6) calc(var(--space-4) + var(--footer-h)); min-width: 0; }
 .main-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-2); }
 .group-view-title { font-size: 18px; font-family: var(--font-heading); font-weight: 700; margin: 0; }
 .active-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
@@ -163,7 +172,7 @@
 .mobile-nav-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 30; }
 
 .mobile-nav-drawer {
-  display: none; position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 84vw);
+  display: none; position: fixed; top: 0; bottom: var(--footer-h); left: 0; width: min(300px, 84vw);
   background: var(--color-bg); z-index: 40; overflow-y: auto; padding: var(--space-4) var(--space-3);
   box-shadow: var(--shadow-lg);
 }
