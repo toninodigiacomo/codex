@@ -141,10 +141,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <h1><?= str_replace('{br}', '<br>', htmlspecialchars(t('login.pitch_h1'))) ?></h1>
       <p><?= htmlspecialchars(t('login.pitch_p')) ?></p>
     </div>
-    <p class="pitch-footer">
-      <a href="https://github.com/toninodigiacomo/codex" target="_blank" rel="noopener noreferrer">GitHub</a>
-      &nbsp;·&nbsp; GNU General Public License v3.0
-    </p>
   </div>
 
   <div class="form-side">

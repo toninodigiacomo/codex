@@ -21,6 +21,8 @@ final class MiniZip
     private const EOCD_SIG = "PK\x05\x06";
     private const CENTRAL_SIG = "PK\x01\x02";
     private const LOCAL_SIG = "PK\x03\x04";
+    /** General-purpose flag bit 11 ("language encoding flag / EFS") — tells any other ZIP tool an entry name is UTF-8, not the legacy CP437 assumed otherwise. Only actually matters once an entry name has non-ASCII characters (this app's own renumbered P00001.jpg-style names never do), but costs nothing to set correctly regardless. */
+    private const UTF8_FLAG = 0x0800;
 
     /**
      * Returns the raw (decompressed) content of the first entry whose
@@ -64,6 +66,31 @@ final class MiniZip
     {
         $result = self::withCentralDirectory($absolutePath, fn($fh, array $entries) => array_keys($entries));
         return $result ?? [];
+    }
+
+    /**
+     * Reads every entry's raw (decompressed) content in one pass — what
+     * CbzEditor needs to rebuild an archive, since MiniZip::write() takes
+     * a full name => content map rather than reading lazily one entry at
+     * a time. An entry MiniZip can't decompress (an unsupported method)
+     * is simply omitted rather than failing the whole read — the caller
+     * treats a missing expected entry as its own error condition.
+     * @return array<string, string>|null name => raw content, in
+     *         central-directory order, or null if the archive itself
+     *         couldn't be opened/parsed at all.
+     */
+    public static function readAllEntries(string $absolutePath): ?array
+    {
+        return self::withCentralDirectory($absolutePath, function ($fh, array $entries) {
+            $result = [];
+            foreach ($entries as $name => $header) {
+                $data = self::readEntryData($fh, $header);
+                if ($data !== null) {
+                    $result[$name] = $data;
+                }
+            }
+            return $result;
+        });
     }
 
     /**
@@ -180,5 +207,77 @@ final class MiniZip
             })(),
             default => null, // unsupported compression method
         };
+    }
+
+    /**
+     * Writes a brand-new ZIP archive to $outputPath containing exactly
+     * $entries (name => raw content), in that order — never touches an
+     * existing file, including whatever $outputPath's final destination
+     * might be; the caller (CbzEditor::save()) is the one responsible for
+     * atomically replacing an original only once this has fully
+     * succeeded, so a failure here can never leave a half-written or
+     * corrupted archive in the file a reader would actually open.
+     *
+     * Every entry is stored (method 0, no compression) rather than
+     * deflated — comic pages are already-compressed JPEG/PNG, so DEFLATE
+     * would save little to nothing on them anyway, and this avoids
+     * needing a hand-written compressor here at all: one clear format to
+     * get right (store) instead of two. This matches how a meaningful
+     * share of real-world scan releases already package their pages
+     * uncompressed for exactly this reason.
+     */
+    public static function write(string $outputPath, array $entries): bool
+    {
+        $fh = @fopen($outputPath, 'wb');
+        if ($fh === false) {
+            return false;
+        }
+        try {
+            [$dosTime, $dosDate] = self::dosDateTime();
+            $central = [];
+            foreach ($entries as $name => $data) {
+                $offset = ftell($fh);
+                if ($offset === false) {
+                    return false;
+                }
+                $crc = crc32($data);
+                $size = strlen($data);
+                $local = pack(
+                    'VvvvvvVVVvv',
+                    0x04034b50, 20, self::UTF8_FLAG, 0, $dosTime, $dosDate, $crc, $size, $size, strlen($name), 0
+                );
+                if (fwrite($fh, $local . $name . $data) === false) {
+                    return false;
+                }
+                $central[] = ['name' => $name, 'crc' => $crc, 'size' => $size, 'offset' => $offset];
+            }
+
+            $cdStart = ftell($fh);
+            foreach ($central as $rec) {
+                $header = pack(
+                    'VvvvvvvVVVvvvvvVV',
+                    0x02014b50, 20, 20, self::UTF8_FLAG, 0, $dosTime, $dosDate,
+                    $rec['crc'], $rec['size'], $rec['size'], strlen($rec['name']),
+                    0, 0, 0, 0, 0, $rec['offset']
+                );
+                if (fwrite($fh, $header . $rec['name']) === false) {
+                    return false;
+                }
+            }
+            $cdSize = ftell($fh) - $cdStart;
+            $eocd = pack('VvvvvVVv', 0x06054b50, 0, 0, count($central), count($central), $cdSize, $cdStart, 0);
+            return fwrite($fh, $eocd) !== false;
+        } finally {
+            fclose($fh);
+        }
+    }
+
+    /** @return array{0: int, 1: int} [DOS time, DOS date] for the local/central headers above — the archive's own internal timestamps, unrelated to the .cbz file's own filesystem mtime. */
+    private static function dosDateTime(): array
+    {
+        $t = getdate();
+        $dosTime = ($t['hours'] << 11) | ($t['minutes'] << 5) | intdiv($t['seconds'], 2);
+        $dosDate = (($t['year'] - 1980) << 9) | ($t['mon'] << 5) | $t['mday'];
+        return [$dosTime, $dosDate];
     }
 }

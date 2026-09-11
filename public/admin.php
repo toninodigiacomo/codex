@@ -44,6 +44,7 @@ $me = Auth::currentUser();
     <div class="admin-tabs" role="tablist">
       <button class="admin-tab active" data-tab="users"><?= htmlspecialchars(t('admin.tab_users')) ?></button>
       <button class="admin-tab" data-tab="libraries"><?= htmlspecialchars(t('admin.tab_libraries')) ?></button>
+      <button class="admin-tab" data-tab="objects"><?= htmlspecialchars(t('admin.tab_objects')) ?></button>
       <button class="admin-tab" data-tab="settings"><?= htmlspecialchars(t('admin.tab_settings')) ?></button>
       <button class="admin-tab" data-tab="maintenance"><?= htmlspecialchars(t('admin.tab_maintenance')) ?></button>
       <button class="admin-tab" data-tab="system"><?= htmlspecialchars(t('admin.tab_system')) ?></button>
@@ -51,6 +52,7 @@ $me = Auth::currentUser();
 
     <section id="panel-users" class="admin-panel"></section>
     <section id="panel-libraries" class="admin-panel" hidden></section>
+    <section id="panel-objects" class="admin-panel" hidden></section>
     <section id="panel-settings" class="admin-panel" hidden></section>
     <section id="panel-maintenance" class="admin-panel" hidden></section>
     <section id="panel-system" class="admin-panel" hidden></section>

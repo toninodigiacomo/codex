@@ -93,8 +93,15 @@ final class Items
         }
     }
 
+    /** Also removes this item's own cover file, if it has one — {id}.* in public/assets/covers/, the same glob ItemEnrichment::extractAndSaveCover() already uses when replacing one. Every deletion path (a single item, orphan cleanup, the exclude-pattern/wrong-format cleanups) goes through this one method, so fixing it here covers all of them at once rather than needing the same cleanup repeated at each call site. */
     public static function delete(int $id): void
     {
+        $coverDir = realpath(__DIR__ . '/../public/assets/covers');
+        if ($coverDir !== false) {
+            foreach (glob($coverDir . '/' . $id . '.*') ?: [] as $old) {
+                @unlink($old);
+            }
+        }
         $stmt = Database::connection()->prepare('DELETE FROM items WHERE id = ?');
         $stmt->execute([$id]);
     }

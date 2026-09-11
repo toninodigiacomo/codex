@@ -82,6 +82,30 @@ final class Settings
         return $token;
     }
 
+    /** Separate from syncToken() on purpose — a leaked sync token only lets someone trigger a re-scan; a leaked backup token hands over the whole database (password hashes, emails, reading history) in one download, so the two are never interchangeable. */
+    public static function backupToken(): string
+    {
+        $token = self::get('backup_api_token');
+        if (!$token) {
+            $token = bin2hex(random_bytes(24));
+            self::set('backup_api_token', $token);
+        }
+        return $token;
+    }
+
+    public static function regenerateBackupToken(): string
+    {
+        $token = bin2hex(random_bytes(24));
+        self::set('backup_api_token', $token);
+        return $token;
+    }
+
+    /** The footer's "Codex" link target — deliberately never hardcoded to a specific account/org in the source itself, so the git history carries no one's personal identity. Empty by default; Theme::footerHtml() renders plain (unlinked) text when it's unset rather than guessing at a URL. */
+    public static function githubUrl(): string
+    {
+        return (string) self::get('github_url', '');
+    }
+
     /**
      * A PCRE pattern (delimiters included, e.g. "/foo/i") checked against
      * every file and folder *basename* during a library scan — a match

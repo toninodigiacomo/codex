@@ -86,4 +86,63 @@ final class ComicInfo
 
         return $result;
     }
+
+    /**
+     * Builds a ComicInfo.xml document from an item's current fields —
+     * the reverse of read() above, using the same two field maps so the
+     * tag names stay in sync automatically rather than needing to be
+     * kept in two separate places by hand. $pageCount drives both the
+     * <PageCount> element and a <Pages> list (0-based Image index,
+     * matching how every page-serving route elsewhere in this app
+     * already indexes pages) — the first page is marked Type="FrontCover"
+     * per the schema's own convention, the same assumption
+     * CoverExtractor::forItem() makes for a comic with no ComicInfo.xml
+     * at all.
+     *
+     * Values are escaped by hand before being handed to addChild() —
+     * SimpleXMLElement does *not* escape its own text-content argument
+     * (it's parsed as XML fragment, not literal text), so skipping this
+     * would silently corrupt anything containing '&', '<', or '>', or
+     * outright break the file if a value happened to look like a tag.
+     */
+    public static function write(array $fields, int $pageCount): string
+    {
+        $xml = new SimpleXMLElement(
+            '<?xml version="1.0" encoding="utf-8"?>' .
+            '<ComicInfo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"></ComicInfo>'
+        );
+
+        $addIfSet = static function (string $tag, $value) use ($xml): void {
+            if ($value === null || $value === '') {
+                return;
+            }
+            $escaped = htmlspecialchars((string) $value, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+            $xml->addChild($tag, $escaped);
+        };
+
+        $addIfSet('Title', $fields['title'] ?? null);
+        $addIfSet('Series', $fields['series_name'] ?? null);
+        $addIfSet('Number', $fields['issue_number'] ?? null);
+        $addIfSet('Summary', $fields['synopsis'] ?? null);
+        $addIfSet('Publisher', $fields['publisher'] ?? null);
+        foreach (self::DETAIL_FIELD_MAP as $tag => $field) {
+            $addIfSet($tag, $fields[$field] ?? null);
+        }
+        $xml->addChild('PageCount', (string) $pageCount);
+
+        if ($pageCount > 0) {
+            $pages = $xml->addChild('Pages');
+            for ($i = 0; $i < $pageCount; $i++) {
+                $page = $pages->addChild('Page');
+                $page->addAttribute('Image', (string) $i);
+                if ($i === 0) {
+                    $page->addAttribute('Type', 'FrontCover');
+                }
+            }
+        }
+
+        $dom = dom_import_simplexml($xml)->ownerDocument;
+        $dom->formatOutput = true;
+        return $dom->saveXML();
+    }
 }

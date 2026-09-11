@@ -98,3 +98,43 @@ label.orphan-row { cursor: pointer; }
    so this has to fit the longer of the two, not just look right for
    whichever happens to be showing at the moment). */
 .user-row-action { min-width: 150px; width: auto; justify-content: center; text-align: center; }
+
+/* Objects tab — the tree browser. Each .tree-node's own .tree-children
+   nests inside it in the DOM (not a separate flat list), so indentation
+   is just this rule applying recursively — a level 3 folder is indented
+   3× without any extra bookkeeping for how deep it is. */
+.tree-node { margin: 2px 0; }
+.tree-children { padding-left: 20px; border-left: 1px solid var(--color-divider); margin-left: 9px; }
+.tree-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13.5px;
+}
+.tree-row:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.tree-toggle {
+  flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-sm); background: var(--color-surface-raised);
+  font-size: 13px; line-height: 1; cursor: pointer; color: inherit;
+}
+.tree-toggle-leaf { border: none; background: none; color: var(--color-accent); font-size: 15px; }
+.tree-label { flex: 1; }
+.tree-item-panel { padding: 10px 0 10px 28px; }
+.tree-item-panel .admin-row { background: var(--color-surface); }
+.tree-loading { font-size: 12.5px; padding: 4px 6px; }
+
+/* CBZ editor popup */
+.cbz-editor-dialog { width: min(920px, 95vw); max-height: 90vh; }
+.cbz-editor-dialog .dialog-body { overflow-y: auto; max-height: 70vh; }
+.cbz-backup-warning {
+  background: color-mix(in srgb, #ff3b3b 15%, var(--color-surface-raised));
+  border: 1px solid color-mix(in srgb, #ff3b3b 40%, transparent);
+  border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: var(--space-4);
+}
+.cbz-backup-warning strong { display: block; color: #ff8a8a; font-size: 14px; margin-bottom: 4px; }
+.cbz-backup-warning p { margin: 0; font-size: 13px; line-height: 1.5; }
+.cbz-editor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+.cbz-page-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 10px; }
+.cbz-page-cell { border: 1px solid var(--color-divider); border-radius: var(--radius-md); overflow: hidden; background: var(--color-surface); }
+.cbz-page-thumb { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--color-surface-raised); }
+.cbz-page-controls { display: flex; align-items: center; gap: 2px; padding: 4px 6px; font-size: 11px; }
+.cbz-page-num { flex: 1; color: var(--color-text); opacity: 0.7; }
+.cbz-page-controls .btn-sm { padding: 2px 6px; min-width: auto; }

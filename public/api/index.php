@@ -23,6 +23,8 @@ require_once __DIR__ . '/../../src/PdfRenderer.php';
 require_once __DIR__ . '/../../src/AccountManager.php';
 require_once __DIR__ . '/../../src/EmailTemplates.php';
 require_once __DIR__ . '/../../src/Theme.php';
+require_once __DIR__ . '/../../src/BackupManager.php';
+require_once __DIR__ . '/../../src/CbzEditor.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
@@ -37,11 +39,15 @@ AppLog::bootstrap();
 // Codex is a private personal library, not a public site with an admin
 // section bolted on — every API call (reads included) requires a logged-in
 // session, sent automatically by the browser via the session cookie once
-// signed in through login.php. The one exception is the sync routes,
-// which an external scheduler (a host crontab entry, say) needs to be
-// able to call without ever having a browser session at all — those
-// accept a valid X-Sync-Token header instead, checked below before the
-// blanket session requirement, and nowhere else.
+// signed in through login.php. Two exceptions, each with its own
+// dedicated token rather than sharing one — a leaked sync token only lets
+// someone trigger a re-scan, while a leaked backup token hands over the
+// entire database in one download, so keeping them separate limits what
+// either leak actually exposes:
+//  - the sync routes, for an external scheduler (a host crontab entry)
+//    with no browser session at all — X-Sync-Token.
+//  - the backup route, for the same kind of scheduled/unattended use —
+//    X-Backup-Token.
 Auth::bootSession();
 
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
@@ -56,7 +62,12 @@ $method = $_SERVER['REQUEST_METHOD'];
 $isSyncRoute = ($resource === 'sync-all') || ($resource === 'libraries' && $id !== null && $action === 'sync');
 $syncTokenHeader = $_SERVER['HTTP_X_SYNC_TOKEN'] ?? '';
 $hasValidSyncToken = $isSyncRoute && $syncTokenHeader !== '' && hash_equals(Settings::syncToken(), $syncTokenHeader);
-if (!$hasValidSyncToken) {
+
+$isBackupRoute = $resource === 'backup' && ($method === 'GET' || $method === 'POST');
+$backupTokenHeader = $_SERVER['HTTP_X_BACKUP_TOKEN'] ?? '';
+$hasValidBackupToken = $isBackupRoute && $backupTokenHeader !== '' && hash_equals(Settings::backupToken(), $backupTokenHeader);
+
+if (!$hasValidSyncToken && !$hasValidBackupToken) {
     Auth::requireLoginApi();
 }
 
@@ -263,6 +274,135 @@ try {
                 $isFavorite = Favorites::toggle((int) Auth::currentUser()['id'], $id);
                 respond(200, ['is_favorite' => $isFavorite]);
             }
+            if ($method === 'POST' && $id !== null && $action === 'sync') {
+                // The admin console's per-item "Synchroniser" — the same
+                // file_size/file_mtime comparison LibraryScanner::sync() uses
+                // to detect an edit in place, just for one already-known item
+                // rather than a whole library walk. Only re-runs extraction
+                // when something actually changed on disk; reports that back
+                // so the admin isn't left guessing whether anything happened.
+                Auth::requireAdminApi();
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                $absPath = Paths::resolve($item['path']);
+                $currentSize = @filesize($absPath);
+                $currentMtime = @filemtime($absPath);
+                $changed = $currentSize === false
+                    || (int) $currentSize !== (int) ($item['file_size'] ?? -1)
+                    || (int) $currentMtime !== (int) ($item['file_mtime'] ?? -1);
+                if (!$changed) {
+                    respond(200, ['changed' => false]);
+                }
+                $result = ItemEnrichment::run($item);
+                Items::update($id, [
+                    'file_size' => $currentSize !== false ? $currentSize : null,
+                    'file_mtime' => $currentMtime !== false ? $currentMtime : null,
+                    'filename' => basename($absPath),
+                ]);
+                respond(200, ['changed' => true, 'metaFound' => $result['metaFound'], 'coverFound' => $result['coverPath'] !== null]);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'extract-metadata') {
+                // Unconditional — unlike 'sync' above, this re-reads
+                // ComicInfo.xml regardless of whether the file itself
+                // changed (the archive's own contents could've been edited
+                // without touching its mtime in a way sync would notice, or
+                // the admin might just want to try again after a fix).
+                // Cover is untouched on purpose — 'regenerate-cover' below is
+                // the separate action for that, not bundled with this one.
+                Auth::requireAdminApi();
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                $found = ItemEnrichment::extractAndSaveMetadata($item);
+                if ($found) {
+                    Items::update($id, ['metadata_checked_at' => date('c')]);
+                }
+                respond(200, ['metaFound' => $found]);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'regenerate-cover') {
+                Auth::requireAdminApi();
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                $coverPath = ItemEnrichment::extractAndSaveCover($item);
+                respond(200, ['coverFound' => $coverPath !== null]);
+            }
+            if ($method === 'GET' && $id !== null && $action === 'cbz-pages') {
+                // Admin console's CBZ editor popup — current page order
+                // (same ordering the reader itself uses) plus the metadata
+                // fields ComicInfo.xml understands, prefilled from what's
+                // already in the database.
+                Auth::requireAdminApi();
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                if ($item['type'] !== 'comic' || strtolower((string) pathinfo((string) $item['path'], PATHINFO_EXTENSION)) !== 'cbz') {
+                    respond(400, ['error' => "L'édition n'est disponible que pour les fichiers .cbz."]);
+                }
+                $absPath = Paths::resolve((string) $item['path']);
+                $pages = CbzEditor::listPages($absPath);
+                $meta = array_merge(
+                    array_intersect_key($item, array_flip(['title', 'series_name', 'issue_number', 'synopsis', 'publisher'])),
+                    $item['details'] ?? []
+                );
+                respond(200, ['pages' => $pages, 'meta' => $meta]);
+            }
+            if ($method === 'POST' && $id !== null && $action === 'cbz-save') {
+                // Rewrites the archive itself (via CbzEditor::save() — see
+                // its own docblock for the write-to-temp/verify/atomic-
+                // rename safety this goes through), then applies the same
+                // metadata to the database and refreshes the cover, since
+                // the first page may well be a different image after a
+                // reorder or deletion.
+                Auth::requireAdminApi();
+                $item = Items::find($id);
+                if (!$item) {
+                    respond(404, ['error' => 'Item introuvable']);
+                }
+                if ($item['type'] !== 'comic' || strtolower((string) pathinfo((string) $item['path'], PATHINFO_EXTENSION)) !== 'cbz') {
+                    respond(400, ['error' => "L'édition n'est disponible que pour les fichiers .cbz."]);
+                }
+                $body = bodyJson();
+                $pages = $body['pages'] ?? null;
+                $meta = $body['meta'] ?? null;
+                if (!is_array($pages) || !is_array($meta)) {
+                    respond(400, ['error' => 'Requête invalide.']);
+                }
+                $absPath = Paths::resolve((string) $item['path']);
+                $result = CbzEditor::save($absPath, $pages, $meta);
+                if (!$result['ok']) {
+                    respond(500, ['error' => $result['error']]);
+                }
+
+                resolveSeriesName($meta);
+                $dbFields = array_intersect_key(
+                    $meta,
+                    array_flip(['title', 'issue_number', 'synopsis', 'publisher', 'series_id',
+                        'writer', 'penciller', 'inker', 'colorist', 'letterer', 'cover_artist', 'editor', 'genre', 'characters', 'age_rating'])
+                );
+                if ($dbFields) {
+                    Items::update($id, $dbFields);
+                }
+
+                // The file's own bytes changed under this same path — refresh
+                // what a sync pass would otherwise catch on its own next
+                // time, right now rather than waiting for that.
+                clearstatcache(true, $absPath);
+                Items::update($id, [
+                    'file_size' => (@filesize($absPath)) ?: null,
+                    'file_mtime' => (@filemtime($absPath)) ?: null,
+                    'metadata_checked_at' => date('c'),
+                ]);
+                $updated = Items::find($id);
+                $coverPath = $updated !== null ? ItemEnrichment::extractAndSaveCover($updated) : null;
+
+                respond(200, ['ok' => true, 'pageCount' => $result['pageCount'], 'coverFound' => $coverPath !== null]);
+            }
             if ($method === 'POST' && $id === null) {
                 $body = bodyJson();
                 resolveSeriesName($body);
@@ -380,6 +520,59 @@ try {
                 }
             }
             respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'admin-subfolders':
+            // Mirrors 'subfolders' below exactly, but admin-gated and
+            // without the reader library-access restriction — same
+            // reasoning as admin-items above: the Objets tab's tree
+            // browser needs the identical folder-listing mechanism the
+            // reader-facing éditeur nav already uses, just reachable by
+            // an admin, who's excluded from that route on purpose.
+            Auth::requireAdminApi();
+            if ($method === 'GET') {
+                $type = (string) ($_GET['type'] ?? '');
+                if ($type === '') {
+                    respond(400, ['error' => 'Paramètre type requis']);
+                }
+                $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
+                $path = isset($_GET['path']) && $_GET['path'] !== '' ? decodeGroupPath((string) $_GET['path']) : [];
+                respond(200, LibraryGroups::listSubfolders($type, null, $libraryId, $path));
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'admin-items':
+            // A separate route on purpose, rather than relaxing the reader
+            // library-list restriction above (GET /api/items with no id) —
+            // that one deliberately stays reader-only ("admins don't
+            // browse", see the comment there); this exists so the admin
+            // console's own "Objets" tab can *find* an item to administer
+            // (sync/re-extract metadata/regenerate its cover), which isn't
+            // the same thing as browsing the collection to read it. Admins
+            // see every library here, no reader-access filtering — same
+            // blanket access they already have for single-item read/edit.
+            Auth::requireAdminApi();
+            $limit = min(100, max(1, (int) ($_GET['limit'] ?? 40)));
+            $offset = max(0, (int) ($_GET['offset'] ?? 0));
+            $filters = array_filter([
+                'type' => $_GET['type'] ?? null,
+                'library_id' => isset($_GET['library_id']) ? (int) $_GET['library_id'] : null,
+                'query' => $_GET['q'] ?? null,
+            ], fn($v) => $v !== null && $v !== '');
+            // Same path/exact mechanism as GET /api/items uses for the
+            // reader-facing éditeur nav — the tree browser's leaf level
+            // needs the exact same "standalone items sitting directly in
+            // this folder" query, just without the reader library filter.
+            if (isset($_GET['path']) && $_GET['path'] !== '' && !empty($filters['type'])) {
+                $path = decodeGroupPath((string) $_GET['path']);
+                $groupLibraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
+                $filters['ids'] = LibraryGroups::itemIdsMatching((string) $filters['type'], null, $path, !empty($_GET['exact']), $groupLibraryId);
+                if (!$filters['ids']) {
+                    respond(200, ['items' => [], 'total' => 0]);
+                }
+            }
+            $sort = (string) ($_GET['sort'] ?? 'filename');
+            $dir = (string) ($_GET['dir'] ?? 'ASC');
+            respond(200, Items::search($filters, $sort, $dir, $limit, $offset));
 
         case 'libraries':
             if ($method === 'GET' && $id === null) {
@@ -715,7 +908,9 @@ try {
             // timestamped filename — collisions across two backups in the same
             // second are the only real risk, and vanishingly unlikely from a
             // single admin clicking a button.
-            Auth::requireAdminApi();
+            if (!$hasValidBackupToken) {
+                Auth::requireAdminApi();
+            }
             if ($method === 'GET') {
                 $dataDir = realpath(__DIR__ . '/../../data');
                 $tmpPath = $dataDir . '/backup-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.sqlite';
@@ -735,6 +930,50 @@ try {
                 header('Content-Length: ' . filesize($tmpPath));
                 readfile($tmpPath);
                 exit;
+            }
+            if ($method === 'POST') {
+                // The scheduled/cron path — unlike the GET download above,
+                // this one is kept server-side (data/backups/) under
+                // BackupManager's own rotation, rather than streamed once
+                // and forgotten. Meant to be called by the same external
+                // scheduler that already drives the sync routes, on its own
+                // separate token — see X-Backup-Token above.
+                try {
+                    $filename = BackupManager::create();
+                } catch (Throwable $e) {
+                    respond(500, ['error' => 'Échec de la sauvegarde : ' . $e->getMessage()]);
+                }
+                respond(200, ['filename' => $filename]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'backups':
+            // Admin-only, always — unlike /api/backup above, there's no
+            // token-based path here, since browsing/downloading/deleting
+            // *stored* backups isn't something a headless cron job ever
+            // needs to do (it only ever calls POST /api/backup itself);
+            // this is purely the admin console's own management UI.
+            Auth::requireAdminApi();
+            if ($rawSecondSegment === null) {
+                if ($method === 'GET') {
+                    respond(200, ['backups' => BackupManager::list()]);
+                }
+                respond(405, ['error' => 'Méthode non autorisée']);
+            }
+            $filename = $rawSecondSegment;
+            if ($method === 'GET') {
+                $path = BackupManager::resolve($filename);
+                if ($path === null) {
+                    respond(404, ['error' => 'Fichier introuvable.']);
+                }
+                header('Content-Type: application/octet-stream');
+                header('Content-Disposition: attachment; filename="' . $filename . '"');
+                header('Content-Length: ' . filesize($path));
+                readfile($path);
+                exit;
+            }
+            if ($method === 'DELETE') {
+                BackupManager::delete($filename) ? respond(200, ['ok' => true]) : respond(404, ['error' => 'Fichier introuvable.']);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -882,6 +1121,40 @@ try {
                     Items::delete((int) $row['id']);
                 }
                 respond(200, ['deleted' => count($matches), 'items' => $matches]);
+            }
+            respond(405, ['error' => 'Méthode non autorisée']);
+
+        case 'cleanup-orphaned-covers':
+            // Same GET-preview/POST-delete shape as the other cleanup
+            // routes — but this one looks at public/assets/covers/ itself
+            // rather than the database: any {id}.* file there whose id no
+            // longer matches an existing item is a leftover from a
+            // deletion that predates Items::delete() cleaning up its own
+            // cover file, or from any other way a cover could've been
+            // orphaned (a manual DB edit, say).
+            Auth::requireAdminApi();
+            $coverDir = realpath(__DIR__ . '/../assets/covers');
+            $orphanedCovers = [];
+            if ($coverDir !== false) {
+                $existingIds = array_flip(array_map('strval', Database::connection()->query('SELECT id FROM items')->fetchAll(PDO::FETCH_COLUMN)));
+                foreach (glob($coverDir . '/*.*') ?: [] as $path) {
+                    $id = pathinfo($path, PATHINFO_FILENAME);
+                    if (ctype_digit($id) && !isset($existingIds[$id])) {
+                        $orphanedCovers[] = ['filename' => basename($path), 'size' => filesize($path) ?: 0];
+                    }
+                }
+            }
+            if ($method === 'GET') {
+                respond(200, ['matches' => $orphanedCovers]);
+            }
+            if ($method === 'POST') {
+                $deleted = 0;
+                foreach ($orphanedCovers as $cover) {
+                    if (@unlink($coverDir . '/' . $cover['filename'])) {
+                        $deleted++;
+                    }
+                }
+                respond(200, ['deleted' => $deleted]);
             }
             respond(405, ['error' => 'Méthode non autorisée']);
 
@@ -1134,7 +1407,9 @@ try {
                 $config['smtp_password_set'] = !empty($config['smtp_password']);
                 unset($config['smtp_password']);
                 $config['site_url'] = Settings::siteUrl();
+                $config['github_url'] = Settings::githubUrl();
                 $config['sync_token'] = Settings::syncToken();
+                $config['backup_token'] = Settings::backupToken();
                 $config['scan_exclude_pattern'] = Settings::scanExcludePattern();
                 $config['show_publishers'] = Settings::showPublishers();
                 $config['show_empty_libraries_nav'] = Settings::showEmptyLibrariesInNav();
@@ -1162,6 +1437,10 @@ try {
                 if (isset($body['site_url'])) {
                     Settings::set('site_url', trim((string) $body['site_url']) ?: null);
                     unset($body['site_url']);
+                }
+                if (isset($body['github_url'])) {
+                    Settings::set('github_url', trim((string) $body['github_url']) ?: null);
+                    unset($body['github_url']);
                 }
                 if (isset($body['scan_exclude_pattern'])) {
                     $pattern = (string) $body['scan_exclude_pattern'];
@@ -1221,6 +1500,9 @@ try {
             }
             if ($method === 'POST' && $rawSecondSegment === 'regenerate-sync-token') {
                 respond(200, ['sync_token' => Settings::regenerateSyncToken()]);
+            }
+            if ($method === 'POST' && $rawSecondSegment === 'regenerate-backup-token') {
+                respond(200, ['backup_token' => Settings::regenerateBackupToken()]);
             }
             if ($method === 'POST' && $rawSecondSegment === 'test-exclude-pattern') {
                 $body = bodyJson();

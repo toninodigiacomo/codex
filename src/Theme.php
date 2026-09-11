@@ -43,11 +43,18 @@ final class Theme
      * through htmlspecialchars() (it's meant to render as a real <a>),
      * so it's substituted in *after* escaping the surrounding translated
      * text, the same order account.js uses for its own {email}-in-HTML
-     * banners.
+     * banners. The GitHub URL itself is never hardcoded here — it comes
+     * from Settings::githubUrl(), admin-configurable and empty by
+     * default, so nothing identifying whoever's actually running this
+     * instance ends up committed to the source. Unset: "Codex" renders
+     * as plain, unlinked text instead of silently omitting it.
      */
     public static function footerHtml(): string
     {
-        $link = '<a href="https://github.com/toninodigiacomo/codex" target="_blank" rel="noopener noreferrer">Codex</a>';
+        $githubUrl = Settings::githubUrl();
+        $link = $githubUrl !== ''
+            ? '<a href="' . htmlspecialchars($githubUrl, ENT_QUOTES) . '" target="_blank" rel="noopener noreferrer">Codex</a>'
+            : 'Codex';
         $line = str_replace(
             ['{link}', '{theme}'],
             [$link, htmlspecialchars(self::displayName())],

@@ -90,7 +90,8 @@ final class ItemPages
     }
 
     /** @return list<string> */
-    private static function sortedImageNamesInZip(string $absPath): array
+    /** Public rather than private — CbzEditor.php's page list needs the exact same ordering the reader uses, rather than risking drift from a second, slightly-different implementation. */
+    public static function sortedImageNamesInZip(string $absPath): array
     {
         $names = [];
         foreach (MiniZip::listEntries($absPath) as $name) {

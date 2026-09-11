@@ -39,6 +39,7 @@
   const panels = {
     users: document.getElementById('panel-users'),
     libraries: document.getElementById('panel-libraries'),
+    objects: document.getElementById('panel-objects'),
     settings: document.getElementById('panel-settings'),
     maintenance: document.getElementById('panel-maintenance'),
     system: document.getElementById('panel-system'),
@@ -52,6 +53,7 @@
       if (key !== 'libraries') stopJobPolling();
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
+      if (key === 'objects') renderObjectsTab();
       if (key === 'settings') renderSettingsTab();
       if (key === 'maintenance') renderMaintenanceTab();
       if (key === 'system') renderSystemTab();
@@ -1026,6 +1028,497 @@
   }
 
   // ============================================================
+  // Objects — find one item and act on it directly (sync it, force a
+  // metadata re-read, regenerate its cover), rather than waiting for a
+  // whole-library pass to get to it. GET /api/admin-items is a separate,
+  // admin-only route from the reader-facing GET /api/items list — see
+  // that route's own comment in api/index.php for why.
+  // ============================================================
+  const objState = { library_id: null, q: '', page: 1, type: null, path: null };
+  const OBJ_PAGE_SIZE = 40;
+
+  async function renderObjectsTab() {
+    const panel = panels.objects;
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+    try {
+      const libraries = await api('GET', '/api/libraries');
+      panel.innerHTML = `
+        <div class="admin-card">
+          <h2>${esc(t('admin.tab_objects'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('admin.objects_hint'))}</p>
+          <div class="admin-form-row">
+            <div class="field">
+              <label for="objLibraryFilter">${esc(t('admin.accessible_libraries'))}</label>
+              <select class="input" id="objLibraryFilter">
+                <option value="">${esc(t('admin.all_libraries'))}</option>
+                ${libraries.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field" style="flex:2;">
+              <label for="objSearchInput">${esc(t('nav.search_placeholder'))}</label>
+              <input class="input" id="objSearchInput" placeholder="${esc(t('nav.search_placeholder'))}" />
+            </div>
+          </div>
+          <div id="objectsTreeWrap">
+            <div id="objectsTree"></div>
+          </div>
+          <div id="objectsFlatWrap" hidden>
+            <button type="button" class="btn btn-ghost btn-sm" id="objBackToTreeBtn">${esc(t('admin.back_to_tree'))}</button>
+            <p class="text-muted" id="objResultCount" style="font-size:13px;"></p>
+            <div id="objectsList"></div>
+            <div class="pagination" id="objectsPagination" hidden></div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('objLibraryFilter').addEventListener('change', (e) => {
+        objState.library_id = e.target.value || null;
+        renderObjectsTree(libraries);
+      });
+      let objSearchTimer = null;
+      document.getElementById('objSearchInput').addEventListener('input', (e) => {
+        clearTimeout(objSearchTimer);
+        objSearchTimer = setTimeout(() => {
+          objState.q = e.target.value.trim();
+          objState.page = 1;
+          objState.path = null;
+          if (objState.q) {
+            showObjectsFlatView();
+            loadObjectsList();
+          } else {
+            showObjectsTreeView();
+          }
+        }, 300);
+      });
+      document.getElementById('objBackToTreeBtn').addEventListener('click', () => {
+        document.getElementById('objSearchInput').value = '';
+        objState.q = '';
+        objState.path = null;
+        showObjectsTreeView();
+      });
+
+      renderObjectsTree(libraries);
+    } catch (err) {
+      panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
+    }
+  }
+
+  function showObjectsTreeView() {
+    document.getElementById('objectsTreeWrap').hidden = false;
+    document.getElementById('objectsFlatWrap').hidden = true;
+  }
+  function showObjectsFlatView() {
+    document.getElementById('objectsTreeWrap').hidden = true;
+    document.getElementById('objectsFlatWrap').hidden = false;
+  }
+
+  /** Root level: one expandable node per library — filtered down to just one if objLibraryFilter is set, matching how the flat view's own library filter works. */
+  function renderObjectsTree(libraries) {
+    const container = document.getElementById('objectsTree');
+    const toShow = objState.library_id ? libraries.filter((l) => String(l.id) === String(objState.library_id)) : libraries;
+    if (!toShow.length) {
+      container.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.no_library'))}</p>`;
+      return;
+    }
+    container.innerHTML = toShow.map((l) => treeNodeHtml(l.type, l.id, l.name, [], l.item_count)).join('');
+    bindTreeContainer(container);
+  }
+
+  function treeNodeHtml(type, libraryId, label, path, count) {
+    return `
+      <div class="tree-node" data-tree-type="${esc(type)}" data-tree-lib="${libraryId}" data-tree-path='${esc(JSON.stringify(path))}'>
+        <div class="tree-row">
+          <button type="button" class="tree-toggle" data-tree-toggle aria-label="${esc(t('admin.expand'))}">+</button>
+          <span class="tree-label">${esc(label)}${count != null ? ` <span class="text-muted">(${count})</span>` : ''}</span>
+        </div>
+        <div class="tree-children" hidden></div>
+      </div>`;
+  }
+
+  function treeItemRowHtml(item) {
+    const typeLabel = TYPE_LABEL_KEYS[item.type] ? t(TYPE_LABEL_KEYS[item.type]) : item.type;
+    return `
+      <div class="tree-item" data-tree-item="${item.id}">
+        <div class="tree-row tree-row-item" data-tree-item-toggle>
+          <span class="tree-toggle tree-toggle-leaf">›</span>
+          <span class="tree-label">${esc(item.title)} <span class="text-muted">(${esc(typeLabel)})</span></span>
+        </div>
+        <div class="tree-item-panel" hidden></div>
+      </div>`;
+  }
+
+  /** Binds only the direct children of $container — called both on the tree root (once) and on each node's own .tree-children as it's lazily populated, so a node's toggle is never bound more than once. */
+  function bindTreeContainer(container) {
+    container.querySelectorAll(':scope > .tree-node > .tree-row [data-tree-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => toggleTreeNode(btn.closest('.tree-node')));
+    });
+    container.querySelectorAll(':scope > .tree-item > .tree-row').forEach((row) => {
+      row.addEventListener('click', () => toggleTreeItem(row.closest('.tree-item')));
+    });
+    container.querySelectorAll(':scope > [data-tree-see-all]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ctx = JSON.parse(btn.dataset.treeSeeAll);
+        objState.library_id = String(ctx.libraryId);
+        objState.type = ctx.type;
+        objState.path = ctx.path;
+        objState.q = '';
+        objState.page = 1;
+        document.getElementById('objLibraryFilter').value = String(ctx.libraryId);
+        document.getElementById('objSearchInput').value = '';
+        showObjectsFlatView();
+        loadObjectsList();
+      });
+    });
+  }
+
+  async function toggleTreeNode(nodeEl) {
+    const childrenEl = nodeEl.querySelector(':scope > .tree-children');
+    const toggleBtn = nodeEl.querySelector(':scope > .tree-row [data-tree-toggle]');
+    if (!childrenEl.hidden) {
+      childrenEl.hidden = true;
+      toggleBtn.textContent = '+';
+      return;
+    }
+    childrenEl.hidden = false;
+    toggleBtn.textContent = '−';
+    if (childrenEl.dataset.loaded === '1') return;
+
+    const type = nodeEl.dataset.treeType;
+    const libraryId = nodeEl.dataset.treeLib;
+    const path = JSON.parse(nodeEl.dataset.treePath);
+    const pathParam = encodeURIComponent(JSON.stringify(path));
+    toggleBtn.disabled = true;
+    childrenEl.innerHTML = `<p class="text-muted tree-loading">${esc(t('common.loading'))}</p>`;
+    try {
+      const [subfolders, standalone] = await Promise.all([
+        api('GET', `/api/admin-subfolders?type=${encodeURIComponent(type)}&library_id=${libraryId}&path=${pathParam}`),
+        api('GET', `/api/admin-items?type=${encodeURIComponent(type)}&library_id=${libraryId}&path=${pathParam}&exact=1&limit=31&sort=filename&dir=ASC`),
+      ]);
+      let html = subfolders.map((sf) => treeNodeHtml(type, libraryId, sf.name, [...path, sf.name], sf.count)).join('');
+      if (subfolders.length) {
+        // Folders first, then any tomes sitting loose right alongside them —
+        // capped inline so a big éditeur's odd one-shots don't turn one
+        // tree level into a wall of rows; "voir tout" hands off to the
+        // full paginated view for anything beyond that.
+        html += standalone.items.slice(0, 30).map(treeItemRowHtml).join('');
+        if (standalone.total > 30) {
+          html += `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all='${esc(JSON.stringify({ type, libraryId, path }))}'>${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
+        }
+      } else if (standalone.total > 0) {
+        // A true leaf — no subfolders at all. Never rendered inline here,
+        // however many there are: this is exactly the flat paginated view's
+        // job, not the tree's.
+        html = `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all='${esc(JSON.stringify({ type, libraryId, path }))}'>${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
+      }
+      childrenEl.innerHTML = html || `<p class="text-muted tree-loading">${esc(t('admin.no_object_found'))}</p>`;
+      childrenEl.dataset.loaded = '1';
+      bindTreeContainer(childrenEl);
+    } catch (err) {
+      childrenEl.innerHTML = `<p class="text-muted tree-loading">${esc(t('library.generic_error', { message: err.message }))}</p>`;
+    } finally {
+      toggleBtn.disabled = false;
+    }
+  }
+
+  async function toggleTreeItem(itemEl) {
+    const panel = itemEl.querySelector(':scope > .tree-item-panel');
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    if (panel.dataset.loaded === '1') return;
+    const id = itemEl.dataset.treeItem;
+    try {
+      const item = await api('GET', `/api/items/${id}`);
+      panel.innerHTML = objectRowHtml(item);
+      bindObjectRowActions(panel);
+      panel.dataset.loaded = '1';
+    } catch (err) {
+      panel.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+    }
+  }
+
+  async function loadObjectsList() {
+    const listEl = document.getElementById('objectsList');
+    const countEl = document.getElementById('objResultCount');
+    const paginationEl = document.getElementById('objectsPagination');
+    if (!listEl) return; // the admin switched tabs before this resolved
+    listEl.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+    try {
+      const params = new URLSearchParams({
+        limit: String(OBJ_PAGE_SIZE),
+        offset: String((objState.page - 1) * OBJ_PAGE_SIZE),
+        sort: 'filename',
+        dir: 'ASC',
+      });
+      if (objState.library_id) params.set('library_id', objState.library_id);
+      if (objState.q) params.set('q', objState.q);
+      // Set together by the tree's own "voir tout" links (see
+      // bindTreeContainer above) — scopes the flat view to one exact
+      // folder rather than the whole library/search results.
+      if (objState.path) {
+        params.set('type', objState.type);
+        params.set('path', JSON.stringify(objState.path));
+        params.set('exact', '1');
+      }
+      const res = await api('GET', `/api/admin-items?${params.toString()}`);
+      countEl.textContent = t(res.total === 1 ? 'library.result_count_one' : 'library.result_count_other', { count: res.total });
+      if (!res.items.length) {
+        listEl.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.no_object_found'))}</p>`;
+        paginationEl.hidden = true;
+        return;
+      }
+      listEl.innerHTML = res.items.map(objectRowHtml).join('');
+      bindObjectRowActions(listEl);
+      const totalPages = Math.max(1, Math.ceil(res.total / OBJ_PAGE_SIZE));
+      if (totalPages <= 1) {
+        paginationEl.hidden = true;
+      } else {
+        paginationEl.hidden = false;
+        paginationEl.innerHTML = `
+          <button type="button" class="btn btn-secondary" data-obj-page="prev" ${objState.page <= 1 ? 'disabled' : ''}>‹</button>
+          <span class="page-indicator">${objState.page} / ${totalPages}</span>
+          <button type="button" class="btn btn-secondary" data-obj-page="next" ${objState.page >= totalPages ? 'disabled' : ''}>›</button>
+        `;
+        paginationEl.querySelector('[data-obj-page="prev"]').addEventListener('click', () => { objState.page--; loadObjectsList(); });
+        paginationEl.querySelector('[data-obj-page="next"]').addEventListener('click', () => { objState.page++; loadObjectsList(); });
+      }
+    } catch (err) {
+      listEl.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
+    }
+  }
+
+  function objectRowHtml(item) {
+    const typeLabel = TYPE_LABEL_KEYS[item.type] ? t(TYPE_LABEL_KEYS[item.type]) : item.type;
+    const isCbz = item.type === 'comic' && (item.format || '').toLowerCase() === 'cbz';
+    return `
+      <div class="admin-row" id="obj-row-${item.id}">
+        <div class="admin-row-main">
+          <strong>${esc(item.title)}</strong>
+          <span>${esc(typeLabel)} · ${esc(item.library_name || '')} · ${esc(item.format || '')}</span>
+        </div>
+        <div class="admin-row-actions">
+          <div class="admin-row-actions-group">
+            <button class="btn btn-secondary btn-sm" data-obj-sync="${item.id}">${esc(t('admin.sync'))}</button>
+            <button class="btn btn-secondary btn-sm" data-obj-metadata="${item.id}" ${item.type !== 'comic' ? 'disabled title="' + esc(t('admin.comics_only')) + '"' : ''}>${esc(t('admin.force_metadata'))}</button>
+            <button class="btn btn-secondary btn-sm" data-obj-cover="${item.id}">${esc(t('admin.force_cover'))}</button>
+            ${isCbz ? `<button class="btn btn-secondary btn-sm" data-obj-edit-cbz="${item.id}">${esc(t('admin.edit_cbz'))}</button>` : ''}
+            <a class="btn btn-secondary btn-sm" href="item.php?id=${item.id}">${esc(t('common.edit'))}</a>
+          </div>
+        </div>
+        <div class="sync-result" id="obj-result-${item.id}"></div>
+      </div>`;
+  }
+
+  function bindObjectRowActions(container) {
+    container.querySelectorAll('[data-obj-edit-cbz]').forEach((btn) => {
+      btn.addEventListener('click', () => openCbzEditor(btn.dataset.objEditCbz));
+    });
+    container.querySelectorAll('[data-obj-sync]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.objSync;
+        const box = document.getElementById(`obj-result-${id}`);
+        btn.disabled = true;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('common.loading'))}</p>`;
+        try {
+          const res = await api('POST', `/api/items/${id}/sync`);
+          box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(res.changed ? t('admin.obj_sync_changed', { meta: res.metaFound ? '✓' : '✗', cover: res.coverFound ? '✓' : '✗' }) : t('admin.obj_sync_unchanged'))}</p>`;
+        } catch (err) {
+          box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+    container.querySelectorAll('[data-obj-metadata]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.objMetadata;
+        const box = document.getElementById(`obj-result-${id}`);
+        btn.disabled = true;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('common.loading'))}</p>`;
+        try {
+          const res = await api('POST', `/api/items/${id}/extract-metadata`);
+          box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(res.metaFound ? t('admin.obj_metadata_found') : t('admin.obj_metadata_not_found'))}</p>`;
+        } catch (err) {
+          box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+    container.querySelectorAll('[data-obj-cover]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.objCover;
+        const box = document.getElementById(`obj-result-${id}`);
+        btn.disabled = true;
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('common.loading'))}</p>`;
+        try {
+          const res = await api('POST', `/api/items/${id}/regenerate-cover`);
+          box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(res.coverFound ? t('admin.obj_cover_found') : t('admin.obj_cover_not_found'))}</p>`;
+        } catch (err) {
+          box.innerHTML = `<p class="account-error" style="font-size:13px;">${esc(err.message)}</p>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  // ------------------------------------------------------------
+  // CBZ editor popup — reorder/delete pages, edit ComicRack-schema
+  // metadata, rewrite the archive. See CbzEditor.php's own docblock for
+  // how the actual rewrite is kept safe (temp file, verified, atomic
+  // rename); this end only has to make the destructive nature of the
+  // action impossible to miss before it's triggered.
+  // ------------------------------------------------------------
+  const CBZ_META_FIELDS = [
+    ['title', 'item.field_title'],
+    ['series_name', 'item.field_series'],
+    ['issue_number', 'item.field_issue_number'],
+    ['publisher', 'item.field_publisher'],
+    ['writer', 'item.field_writer'],
+    ['penciller', 'item.field_penciller'],
+    ['inker', 'item.field_inker'],
+    ['colorist', 'item.field_colorist'],
+    ['letterer', 'item.field_letterer'],
+    ['cover_artist', 'item.field_cover_artist'],
+    ['editor', 'item.field_editor'],
+    ['genre', 'item.field_genre'],
+    ['characters', 'item.field_characters'],
+    ['age_rating', 'item.field_age_rating'],
+  ];
+
+  async function openCbzEditor(id) {
+    let data;
+    try {
+      data = await api('GET', `/api/items/${id}/cbz-pages`);
+    } catch (err) {
+      showToast(err.message, true);
+      return;
+    }
+
+    // cbzPages holds the *original* entry name for every page still kept,
+    // in the order they'll be renumbered on save — this is the only
+    // state the move/delete buttons below actually mutate; the DOM is
+    // just a rendering of it, rebuilt on every change rather than
+    // patched in place, so there's one source of truth for "what will
+    // actually get saved."
+    let cbzPages = data.pages.slice();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'dialog-backdrop';
+    backdrop.innerHTML = `
+      <div class="dialog cbz-editor-dialog">
+        <div class="dialog-title">${esc(t('admin.edit_cbz'))} — ${esc(data.meta.title || '')}</div>
+        <div class="dialog-body">
+          <div class="cbz-backup-warning">
+            <strong>${esc(t('admin.cbz_backup_warning_title'))}</strong>
+            <p>${esc(t('admin.cbz_backup_warning_body'))}</p>
+          </div>
+          <div class="cbz-editor-grid">
+            ${CBZ_META_FIELDS.map(
+              ([field, labelKey]) => `
+              <div class="field">
+                <label for="cbz-${field}">${esc(t(labelKey))}</label>
+                ${
+                  field === 'genre' || field === 'characters'
+                    ? `<textarea class="input" id="cbz-${field}" rows="2">${esc(data.meta[field] || '')}</textarea>`
+                    : `<input class="input" id="cbz-${field}" value="${esc(data.meta[field] ?? '')}" />`
+                }
+              </div>`
+            ).join('')}
+          </div>
+          <h3 style="margin-top:var(--space-4);">${esc(t('admin.cbz_pages_title', { count: cbzPages.length }))}</h3>
+          <p class="text-muted" style="font-size:12.5px;margin-top:-6px;">${esc(t('admin.cbz_pages_hint'))}</p>
+          <div class="cbz-page-list" id="cbzPageList"></div>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="cbzCancelBtn">${esc(t('common.cancel'))}</button>
+          <button type="button" class="btn btn-danger" id="cbzSaveBtn">${esc(t('admin.cbz_save'))}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    function renderPageList() {
+      const listEl = document.getElementById('cbzPageList');
+      listEl.innerHTML = cbzPages
+        .map(
+          (name, i) => `
+          <div class="cbz-page-cell" data-cbz-page-index="${i}">
+            <img class="cbz-page-thumb" src="/api/items/${id}/page?index=${data.pages.indexOf(name)}" loading="lazy" alt="" />
+            <div class="cbz-page-controls">
+              <span class="cbz-page-num">${i + 1}</span>
+              <button type="button" class="btn btn-ghost btn-sm" data-cbz-move="up" ${i === 0 ? 'disabled' : ''} title="${esc(t('admin.cbz_move_up'))}">↑</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cbz-move="down" ${i === cbzPages.length - 1 ? 'disabled' : ''} title="${esc(t('admin.cbz_move_down'))}">↓</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cbz-delete title="${esc(t('common.delete'))}">✕</button>
+            </div>
+          </div>`
+        )
+        .join('');
+      listEl.querySelectorAll('[data-cbz-move="up"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.closest('[data-cbz-page-index]').dataset.cbzPageIndex);
+          [cbzPages[i - 1], cbzPages[i]] = [cbzPages[i], cbzPages[i - 1]];
+          renderPageList();
+        });
+      });
+      listEl.querySelectorAll('[data-cbz-move="down"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.closest('[data-cbz-page-index]').dataset.cbzPageIndex);
+          [cbzPages[i], cbzPages[i + 1]] = [cbzPages[i + 1], cbzPages[i]];
+          renderPageList();
+        });
+      });
+      listEl.querySelectorAll('[data-cbz-delete]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.closest('[data-cbz-page-index]').dataset.cbzPageIndex);
+          if (cbzPages.length <= 1) {
+            showToast(t('admin.cbz_need_one_page'), true);
+            return;
+          }
+          if (!confirm(t('admin.cbz_confirm_delete_page', { n: i + 1 }))) return;
+          cbzPages.splice(i, 1);
+          renderPageList();
+        });
+      });
+    }
+    renderPageList();
+
+    function close() {
+      backdrop.remove();
+      document.removeEventListener('keydown', onEsc);
+    }
+    function onEsc(e) {
+      if (e.key === 'Escape') close();
+    }
+    document.addEventListener('keydown', onEsc);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.getElementById('cbzCancelBtn').addEventListener('click', close);
+
+    document.getElementById('cbzSaveBtn').addEventListener('click', async () => {
+      if (!confirm(t('admin.cbz_confirm_save', { count: cbzPages.length }))) return;
+      const saveBtn = document.getElementById('cbzSaveBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = t('admin.cbz_saving');
+      const meta = {};
+      CBZ_META_FIELDS.forEach(([field]) => {
+        meta[field] = document.getElementById(`cbz-${field}`).value.trim();
+      });
+      try {
+        const res = await api('POST', `/api/items/${id}/cbz-save`, { pages: cbzPages, meta });
+        showToast(t('admin.cbz_save_success', { count: res.pageCount }));
+        close();
+        loadObjectsList();
+      } catch (err) {
+        showToast(err.message, true);
+        saveBtn.disabled = false;
+        saveBtn.textContent = t('admin.cbz_save');
+      }
+    });
+  }
+
+  // ============================================================
   // Settings (display/behavior)
   // ============================================================
   async function renderSettingsTab() {
@@ -1153,6 +1646,14 @@
           </table>
           <button type="button" class="btn btn-secondary btn-sm" id="previewWrongFormatBtn">${esc(t('settings.preview_wrong_format'))}</button>
           <div id="wrongFormatResult" style="margin-top:10px;"></div>
+        </div>
+        <div class="admin-card">
+          <h2>${esc(t('settings.orphaned_covers'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">
+            ${t('settings.orphaned_covers_hint')}
+          </p>
+          <button type="button" class="btn btn-secondary btn-sm" id="previewOrphanedCoversBtn">${esc(t('settings.preview_orphaned_covers'))}</button>
+          <div id="orphanedCoversResult" style="margin-top:10px;"></div>
         </div>
         <div class="admin-card">
           <h2>${esc(t('settings.scheduled_sync'))}</h2>
@@ -1373,6 +1874,39 @@
           showToast(err.message, true);
         }
       });
+
+      document.getElementById('previewOrphanedCoversBtn').addEventListener('click', async () => {
+        const box = document.getElementById('orphanedCoversResult');
+        box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('admin.searching'))}</p>`;
+        try {
+          const res = await api('GET', '/api/cleanup-orphaned-covers');
+          if (!res.matches.length) {
+            box.innerHTML = `<p class="text-muted" style="font-size:13px;">${esc(t('settings.no_orphaned_cover'))}</p>`;
+            return;
+          }
+          const totalSize = res.matches.reduce((sum, m) => sum + m.size, 0);
+          box.innerHTML = `
+            <p style="font-size:13px;">${esc(t('settings.orphaned_covers_found', { count: res.matches.length, size: formatBytes(totalSize) }))}</p>
+            <ul style="font-size:12.5px;color:var(--color-text);opacity:0.8;max-height:160px;overflow-y:auto;margin:8px 0;padding-left:18px;">
+              ${res.matches.map((m) => `<li>${esc(m.filename)} — <span class="text-muted">${formatBytes(m.size)}</span></li>`).join('')}
+            </ul>
+            <button type="button" class="btn btn-danger btn-sm" id="confirmOrphanedCoversBtn">${esc(t('admin.delete_n_items', { count: res.matches.length }))}</button>
+          `;
+          document.getElementById('confirmOrphanedCoversBtn').addEventListener('click', async () => {
+            if (!confirm(t('settings.confirm_delete_orphaned_covers', { count: res.matches.length }))) return;
+            try {
+              const delRes = await api('POST', '/api/cleanup-orphaned-covers');
+              box.innerHTML = `<div class="invite-link-box">${esc(t('admin.items_deleted', { count: delRes.deleted }))}</div>`;
+              showToast(t('admin.cleanup_done'));
+            } catch (err) {
+              showToast(err.message, true);
+            }
+          });
+        } catch (err) {
+          box.innerHTML = '';
+          showToast(err.message, true);
+        }
+      });
     } catch (err) {
       panel.innerHTML = `<p class="text-muted">${esc(t('library.generic_error', { message: err.message }))}</p>`;
     }
@@ -1385,10 +1919,12 @@
     const panel = panels.maintenance;
     panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
     try {
-      const [s, templates] = await Promise.all([
+      const [s, templates, backupsRes] = await Promise.all([
         api('GET', '/api/settings'),
         api('GET', '/api/email-templates'),
+        api('GET', '/api/backups'),
       ]);
+      const backups = backupsRes.backups;
       panel.innerHTML = `
         <div class="admin-card">
           <h2>${esc(t('maintenance.backup'))}</h2>
@@ -1396,6 +1932,42 @@
             ${t('maintenance.backup_hint')}
           </p>
           <a class="btn btn-primary" href="/api/backup" download>${esc(t('maintenance.download_backup'))}</a>
+        </div>
+        <div class="admin-card">
+          <h2>${esc(t('maintenance.scheduled_backup'))}</h2>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('maintenance.scheduled_backup_hint'))}</p>
+          <div class="field">
+            <label>${esc(t('maintenance.backup_token'))}</label>
+            <div class="path-field">
+              <input class="input" id="backupTokenField" value="${esc(s.backup_token)}" readonly onclick="this.select()" style="font-family:monospace;" />
+              <button type="button" class="btn btn-secondary btn-sm" id="regenBackupTokenBtn">${esc(t('settings.regenerate_token'))}</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>${esc(t('maintenance.backup_crontab_example'))}</label>
+            <textarea class="input" readonly rows="2" style="font-family:monospace;font-size:12px;" onclick="this.select()">0 4 * * * curl -s -X POST ${esc(s.site_url)}/api/backup -H "X-Backup-Token: ${esc(s.backup_token)}"</textarea>
+          </div>
+          <div class="field" style="margin-top:var(--space-3);">
+            <label>${esc(t('maintenance.stored_backups', { count: backups.length }))}</label>
+            <p class="text-muted" style="font-size:12.5px;margin-top:-4px;">${esc(t('maintenance.retention_hint'))}</p>
+            <div id="backupList">
+              ${
+                backups.length
+                  ? backups
+                      .map(
+                        (b) => `<div class="admin-row-compact">
+                          <span>${esc(b.filename)} — <span class="text-muted">${formatSyncDate(b.created_at)}, ${formatBytes(b.size)}</span></span>
+                          <span style="display:flex;gap:6px;">
+                            <a class="btn btn-secondary btn-sm" href="/api/backups/${esc(b.filename)}" download>${esc(t('maintenance.download'))}</a>
+                            <button type="button" class="btn btn-danger btn-sm" data-delete-backup="${esc(b.filename)}">${esc(t('common.delete'))}</button>
+                          </span>
+                        </div>`
+                      )
+                      .join('')
+                  : `<p class="text-muted" style="font-size:13px;">${esc(t('maintenance.no_stored_backup'))}</p>`
+              }
+            </div>
+          </div>
         </div>
         <div class="admin-card">
           <h2>${esc(t('maintenance.smtp'))}</h2>
@@ -1442,6 +2014,11 @@
             <div class="field">
               <label for="siteUrl">${esc(t('maintenance.site_url'))}</label>
               <input class="input" id="siteUrl" value="${esc(s.site_url || '')}" />
+            </div>
+            <div class="field">
+              <label for="githubUrl">${esc(t('maintenance.github_url'))}</label>
+              <input class="input" id="githubUrl" value="${esc(s.github_url || '')}" placeholder="https://github.com/..." />
+              <p class="text-muted" style="font-size:12.5px;margin-top:6px;">${esc(t('maintenance.github_url_hint'))}</p>
             </div>
             <div>
               <button type="submit" class="btn btn-primary">${esc(t('common.save'))}</button>
@@ -1540,6 +2117,31 @@
         }
       });
 
+      document.getElementById('regenBackupTokenBtn').addEventListener('click', async () => {
+        if (!confirm(t('settings.confirm_regen_token'))) return;
+        try {
+          const res = await api('POST', '/api/settings/regenerate-backup-token');
+          document.getElementById('backupTokenField').value = res.backup_token;
+          showToast(t('settings.token_regenerated'));
+          renderMaintenanceTab();
+        } catch (err) {
+          showToast(err.message, true);
+        }
+      });
+
+      document.querySelectorAll('[data-delete-backup]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(t('maintenance.confirm_delete_backup', { filename: btn.dataset.deleteBackup }))) return;
+          try {
+            await api('DELETE', `/api/backups/${btn.dataset.deleteBackup}`);
+            showToast(t('admin.item_deleted'));
+            renderMaintenanceTab();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      });
+
       document.getElementById('smtpForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
@@ -1552,6 +2154,7 @@
             smtp_from_email: document.getElementById('smtpFromEmail').value.trim(),
             smtp_from_name: document.getElementById('smtpFromName').value.trim(),
             site_url: document.getElementById('siteUrl').value.trim(),
+            github_url: document.getElementById('githubUrl').value.trim(),
           });
           showToast(t('maintenance.settings_saved'));
         } catch (err) {

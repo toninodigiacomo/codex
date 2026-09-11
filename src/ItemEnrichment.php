@@ -12,41 +12,51 @@ require_once __DIR__ . '/Thumbnails.php';
 /**
  * Reads whatever metadata and cover a file has to offer and applies it to
  * an already-created item. Used right after LibraryScanner discovers a
- * new file, and for backfilling items that predate this — never called
- * directly by an end user; there's no "force re-extract" button anywhere
- * in the app, on purpose. A user with thousands of items has no practical
- * way to trigger this one file at a time, and no reason to: it runs
- * automatically for every newly discovered file, and a bulk "extract
- * what's missing" pass (src/LibraryScanner.php callers use this too)
- * covers anything added before this existed.
+ * new file, for backfilling items that predate this, and — via the two
+ * methods below, called independently rather than together — for the
+ * admin console's own per-item "Synchroniser"/"Métadonnées"/"Miniature"
+ * actions (api/index.php, admin-only). Nothing here is reachable by a
+ * reader; a user with thousands of items has no practical way to trigger
+ * this one file at a time regardless, and no reason to — it still runs
+ * automatically for every newly discovered file.
  */
 final class ItemEnrichment
 {
     /** @return array{metaFound: bool, coverPath: ?string} */
     public static function run(array $item): array
     {
-        $metaFound = false;
-        if ($item['type'] === 'comic') {
-            $absPath = Paths::resolve($item['path']);
-            $meta = ComicInfo::read($absPath);
-            $metaFound = $meta !== null;
-            if ($meta !== null) {
-                if (!empty($meta['series_name'])) {
-                    $meta['series_id'] = Series::findOrCreate($meta['series_name']);
-                }
-                unset($meta['series_name']);
-                if ($meta) {
-                    Items::update((int) $item['id'], $meta);
-                }
-            }
-        }
-
+        $metaFound = self::extractAndSaveMetadata($item);
         $current = Items::find((int) $item['id']);
         $coverPath = $current !== null ? self::extractAndSaveCover($current) : null;
-
         Items::update((int) $item['id'], ['metadata_checked_at' => date('c')]);
-
         return ['metaFound' => $metaFound, 'coverPath' => $coverPath];
+    }
+
+    /**
+     * Split out from run() so the admin console's own per-item actions
+     * (see api/index.php's admin-only /api/items/:id/extract-metadata)
+     * can force *just* this, independently of the cover — "forcer la
+     * synchronisation des métadonnées" and "régénérer la miniature" are
+     * two separate buttons there on purpose, not one bundled action.
+     */
+    public static function extractAndSaveMetadata(array $item): bool
+    {
+        if ($item['type'] !== 'comic') {
+            return false;
+        }
+        $absPath = Paths::resolve($item['path']);
+        $meta = ComicInfo::read($absPath);
+        if ($meta === null) {
+            return false;
+        }
+        if (!empty($meta['series_name'])) {
+            $meta['series_id'] = Series::findOrCreate($meta['series_name']);
+        }
+        unset($meta['series_name']);
+        if ($meta) {
+            Items::update((int) $item['id'], $meta);
+        }
+        return true;
     }
 
     /**
