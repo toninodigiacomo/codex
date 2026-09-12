@@ -13,6 +13,17 @@ RewriteRule ^ api/index.php [L]
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "SAMEORIGIN"
   Header always set Referrer-Policy "same-origin"
+  # 'unsafe-inline' is kept for script-src/style-src on purpose, not an
+  # oversight — this app still has onclick=/onchange= attributes and a lot
+  # of inline style="" in admin.js's templates (114+ instances), and a
+  # stricter policy would break the admin console outright without a much
+  # larger refactor first. Still meaningfully useful as-is: it blocks
+  # loading any resource (including a fetch()/XHR target) from anywhere
+  # but this same origin, which is exactly what a real XSS payload usually
+  # needs to actually exfiltrate anything — frame-ancestors/base-uri/
+  # form-action close off clickjacking, <base>-tag hijacking, and
+  # form-redirect tricks the same way.
+  Header always set Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
 </IfModule>
 
 # Never serve the data directory even if it ends up under the webroot by mistake

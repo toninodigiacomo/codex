@@ -183,24 +183,29 @@ final class Auth
         }
     }
 
-    public static function csrfToken(): string
-    {
-        if (empty($_SESSION['csrf_token'])) {
-            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-        }
-        return $_SESSION['csrf_token'];
-    }
-
-    public static function checkCsrf(?string $token): bool
-    {
-        return !empty($_SESSION['csrf_token']) && is_string($token)
-            && hash_equals($_SESSION['csrf_token'], $token);
-    }
-
     // ---------- brute-force protection ----------
 
+    /**
+     * The real visitor's IP, not the reverse proxy's — safe to trust
+     * X-Forwarded-For here specifically because this container's port is
+     * confirmed never reachable except through nginx-proxy-manager, which
+     * always sets this header itself; if that ever changed (the port
+     * became directly reachable too), a client could freely spoof this
+     * header to frame another IP or dodge their own lockout, and this
+     * would need to go back to REMOTE_ADDR alone. Takes the leftmost
+     * address in the list (the original client, per convention) — a
+     * single well-behaved proxy in front means there's only ever one
+     * entry anyway, but the convention holds even if that changes later.
+     */
     private static function clientKey(): string
     {
+        $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+        if ($forwarded !== '') {
+            $first = trim(explode(',', $forwarded)[0]);
+            if ($first !== '') {
+                return $first;
+            }
+        }
         return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     }
 

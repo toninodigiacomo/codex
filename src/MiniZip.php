@@ -98,6 +98,12 @@ final class MiniZip
      * and hands the file handle + a [name => header] map to $callback —
      * shared setup for all the read operations above.
      */
+    /** Public wrapper around withCentralDirectory() below — lets CbzEditor open the source archive exactly once and stream entries out one at a time (via readEntryData(), also widened to public) rather than materializing every page's decompressed bytes in one big array. Fixed a real memory crash: readAllEntries() held the whole comic in memory at once, which a large enough book could exceed the PHP memory_limit on its own. */
+    public static function withEntries(string $absolutePath, callable $callback)
+    {
+        return self::withCentralDirectory($absolutePath, $callback);
+    }
+
     private static function withCentralDirectory(string $absolutePath, callable $callback)
     {
         $fh = @fopen($absolutePath, 'rb');
@@ -180,7 +186,8 @@ final class MiniZip
         return $entries;
     }
 
-    private static function readEntryData($fh, array $entry): ?string
+    /** Widened to public for the same reason as withEntries() above — CbzEditor reads one entry's data at a time from an already-open handle, immediately writing it out before reading the next, rather than decompressing a whole archive's worth of pages into memory together. */
+    public static function readEntryData($fh, array $entry): ?string
     {
         fseek($fh, $entry['localOffset']);
         $localHeader = fread($fh, 30);
@@ -225,35 +232,73 @@ final class MiniZip
      * get right (store) instead of two. This matches how a meaningful
      * share of real-world scan releases already package their pages
      * uncompressed for exactly this reason.
+     *
+     * Kept for a small/known-safe set of entries — CbzEditor.php does NOT
+     * use this for full comics anymore (see beginWrite()/streamWriteEntry()
+     * below): holding every page's decompressed bytes in one array at
+     * once, the way this method requires, is exactly what caused a real
+     * memory-exhaustion crash on a large enough book.
      */
     public static function write(string $outputPath, array $entries): bool
     {
-        $fh = @fopen($outputPath, 'wb');
-        if ($fh === false) {
+        $writer = self::beginWrite($outputPath);
+        if ($writer === null) {
             return false;
         }
-        try {
-            [$dosTime, $dosDate] = self::dosDateTime();
-            $central = [];
-            foreach ($entries as $name => $data) {
-                $offset = ftell($fh);
-                if ($offset === false) {
-                    return false;
-                }
-                $crc = crc32($data);
-                $size = strlen($data);
-                $local = pack(
-                    'VvvvvvVVVvv',
-                    0x04034b50, 20, self::UTF8_FLAG, 0, $dosTime, $dosDate, $crc, $size, $size, strlen($name), 0
-                );
-                if (fwrite($fh, $local . $name . $data) === false) {
-                    return false;
-                }
-                $central[] = ['name' => $name, 'crc' => $crc, 'size' => $size, 'offset' => $offset];
+        foreach ($entries as $name => $data) {
+            if (!self::streamWriteEntry($writer, $name, $data)) {
+                @fclose($writer->fh);
+                return false;
             }
+        }
+        return self::finishWrite($writer);
+    }
 
+    /**
+     * Streaming counterpart to write() above — for rebuilding an archive
+     * one entry at a time (read one page, write it, discard it, read the
+     * next) instead of materializing every page's decompressed bytes in
+     * memory together. Returns an opaque handle for streamWriteEntry()/
+     * finishWrite() below, or null if $outputPath couldn't be opened.
+     */
+    public static function beginWrite(string $outputPath): ?object
+    {
+        $fh = @fopen($outputPath, 'wb');
+        if ($fh === false) {
+            return null;
+        }
+        return (object) ['fh' => $fh, 'central' => [], 'dt' => self::dosDateTime()];
+    }
+
+    /** Writes one entry immediately to the handle from beginWrite() — $data can be discarded by the caller right after this returns, nothing here holds onto it. */
+    public static function streamWriteEntry(object $writer, string $name, string $data): bool
+    {
+        [$dosTime, $dosDate] = $writer->dt;
+        $offset = ftell($writer->fh);
+        if ($offset === false) {
+            return false;
+        }
+        $crc = crc32($data);
+        $size = strlen($data);
+        $local = pack(
+            'VvvvvvVVVvv',
+            0x04034b50, 20, self::UTF8_FLAG, 0, $dosTime, $dosDate, $crc, $size, $size, strlen($name), 0
+        );
+        if (fwrite($writer->fh, $local . $name . $data) === false) {
+            return false;
+        }
+        $writer->central[] = ['name' => $name, 'crc' => $crc, 'size' => $size, 'offset' => $offset];
+        return true;
+    }
+
+    /** Writes the central directory + EOCD and closes the handle — always closes it, win or lose, so a failure here never leaves a dangling file descriptor. */
+    public static function finishWrite(object $writer): bool
+    {
+        [$dosTime, $dosDate] = $writer->dt;
+        $fh = $writer->fh;
+        try {
             $cdStart = ftell($fh);
-            foreach ($central as $rec) {
+            foreach ($writer->central as $rec) {
                 $header = pack(
                     'VvvvvvvVVVvvvvvVV',
                     0x02014b50, 20, 20, self::UTF8_FLAG, 0, $dosTime, $dosDate,
@@ -265,7 +310,7 @@ final class MiniZip
                 }
             }
             $cdSize = ftell($fh) - $cdStart;
-            $eocd = pack('VvvvvVVv', 0x06054b50, 0, 0, count($central), count($central), $cdSize, $cdStart, 0);
+            $eocd = pack('VvvvvVVv', 0x06054b50, 0, 0, count($writer->central), count($writer->central), $cdSize, $cdStart, 0);
             return fwrite($fh, $eocd) !== false;
         } finally {
             fclose($fh);

@@ -1377,6 +1377,7 @@
     ['series_name', 'item.field_series'],
     ['issue_number', 'item.field_issue_number'],
     ['publisher', 'item.field_publisher'],
+    ['synopsis', 'item.synopsis'],
     ['writer', 'item.field_writer'],
     ['penciller', 'item.field_penciller'],
     ['inker', 'item.field_inker'],
@@ -1388,6 +1389,7 @@
     ['characters', 'item.field_characters'],
     ['age_rating', 'item.field_age_rating'],
   ];
+  const CBZ_MULTILINE_FIELDS = new Set(['synopsis', 'genre', 'characters']);
 
   async function openCbzEditor(id) {
     let data;
@@ -1419,11 +1421,11 @@
           <div class="cbz-editor-grid">
             ${CBZ_META_FIELDS.map(
               ([field, labelKey]) => `
-              <div class="field">
+              <div class="field"${field === 'synopsis' ? ' style="grid-column:1/-1;"' : ''}>
                 <label for="cbz-${field}">${esc(t(labelKey))}</label>
                 ${
-                  field === 'genre' || field === 'characters'
-                    ? `<textarea class="input" id="cbz-${field}" rows="2">${esc(data.meta[field] || '')}</textarea>`
+                  CBZ_MULTILINE_FIELDS.has(field)
+                    ? `<textarea class="input" id="cbz-${field}" rows="${field === 'synopsis' ? 5 : 2}">${esc(data.meta[field] || '')}</textarea>`
                     : `<input class="input" id="cbz-${field}" value="${esc(data.meta[field] ?? '')}" />`
                 }
               </div>`

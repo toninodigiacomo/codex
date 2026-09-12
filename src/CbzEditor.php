@@ -46,6 +46,14 @@ final class CbzEditor
      * ComicInfo.xml with one freshly built from $metaFields, and only
      * then atomically replaces $absolutePath.
      *
+     * Works one page at a time throughout — read a page's bytes, write
+     * them out, let them go before reading the next — rather than ever
+     * holding the whole comic's decompressed pages in memory together.
+     * That "read everything, then write everything" shape is exactly
+     * what caused a real memory-exhaustion crash on a large enough book;
+     * peak memory here is roughly one page's size, however many pages
+     * the comic has.
+     *
      * @param list<string> $keepEntryNames original entry names to keep, in the desired final order
      * @param array<string, mixed> $metaFields same shape ComicInfo::write() expects
      * @return array{ok: bool, error?: string, pageCount?: int}
@@ -56,46 +64,87 @@ final class CbzEditor
             return ['ok' => false, 'error' => "Une bande dessinée doit conserver au moins une page."];
         }
 
-        $original = MiniZip::readAllEntries($absolutePath);
-        if ($original === null) {
-            return ['ok' => false, 'error' => "Impossible de lire l'archive d'origine — rien n'a été modifié."];
-        }
-
-        $newEntries = [];
-        $index = 1;
-        foreach ($keepEntryNames as $oldName) {
-            if (!isset($original[$oldName])) {
-                return ['ok' => false, 'error' => "Page introuvable dans l'archive : " . $oldName];
-            }
-            $ext = strtolower(pathinfo($oldName, PATHINFO_EXTENSION)) ?: 'jpg';
-            $newName = sprintf('P%05d.%s', $index, $ext);
-            $newEntries[$newName] = $original[$oldName];
-            $index++;
-        }
-        $pageCount = count($newEntries);
-        $newEntries['ComicInfo.xml'] = ComicInfo::write($metaFields, $pageCount);
-
         $dir = dirname($absolutePath);
         $tmpPath = $dir . '/.codex-cbz-edit-' . bin2hex(random_bytes(6)) . '.tmp';
 
-        if (!MiniZip::write($tmpPath, $newEntries)) {
+        // expectedSizes collects just name => byte count as each page is
+        // written — cheap bookkeeping (a handful of integers), not a
+        // second copy of the actual page data — used to verify the
+        // rewritten file afterward without a second full read of it.
+        $expectedSizes = [];
+        $writeResult = MiniZip::withEntries($absolutePath, function ($fh, array $sourceEntries) use ($keepEntryNames, $metaFields, $tmpPath, &$expectedSizes) {
+            $writer = MiniZip::beginWrite($tmpPath);
+            if ($writer === null) {
+                return "Échec de l'écriture de la nouvelle archive — le fichier d'origine n'a pas été touché.";
+            }
+            $index = 1;
+            foreach ($keepEntryNames as $oldName) {
+                if (!isset($sourceEntries[$oldName])) {
+                    @fclose($writer->fh);
+                    return "Page introuvable dans l'archive : " . $oldName;
+                }
+                $data = MiniZip::readEntryData($fh, $sourceEntries[$oldName]);
+                if ($data === null) {
+                    @fclose($writer->fh);
+                    return "Impossible de lire la page : " . $oldName;
+                }
+                $ext = strtolower(pathinfo($oldName, PATHINFO_EXTENSION)) ?: 'jpg';
+                $newName = sprintf('P%05d.%s', $index, $ext);
+                if (!MiniZip::streamWriteEntry($writer, $newName, $data)) {
+                    @fclose($writer->fh);
+                    return "Échec de l'écriture de la page : " . $oldName;
+                }
+                $expectedSizes[$newName] = strlen($data);
+                unset($data); // done with this page's bytes before the next iteration reads another
+                $index++;
+            }
+
+            $pageCount = count($expectedSizes);
+            $comicInfo = ComicInfo::write($metaFields, $pageCount);
+            if (!MiniZip::streamWriteEntry($writer, 'ComicInfo.xml', $comicInfo)) {
+                @fclose($writer->fh);
+                return "Échec de l'écriture des métadonnées.";
+            }
+            $expectedSizes['ComicInfo.xml'] = strlen($comicInfo);
+
+            // true, not null, on success — withEntries()/withCentralDirectory()
+            // itself returns null when the archive can't even be opened/
+            // parsed at all, *before* this callback ever runs; reusing null
+            // here for "everything worked" would make that failure
+            // indistinguishable from success once it comes back out of
+            // withEntries() below. A string return anywhere above is always
+            // a specific, already-worded error.
+            return MiniZip::finishWrite($writer) ? true : "Échec de la finalisation de la nouvelle archive.";
+        });
+
+        if ($writeResult === null) {
             @unlink($tmpPath);
-            return ['ok' => false, 'error' => "Échec de l'écriture de la nouvelle archive — le fichier d'origine n'a pas été touché."];
+            return ['ok' => false, 'error' => "Impossible de lire l'archive d'origine — rien n'a été modifié."];
+        }
+        if ($writeResult !== true) {
+            @unlink($tmpPath);
+            return ['ok' => false, 'error' => $writeResult];
         }
 
-        // Independently re-read the file we just wrote, from disk, before
-        // trusting it with anything — this is the whole point of writing
-        // to a temp file first rather than straight to $absolutePath.
-        $verify = MiniZip::readAllEntries($tmpPath);
-        if ($verify === null || count($verify) !== count($newEntries)) {
+        // Independently re-open the file we just wrote, from disk, before
+        // trusting it with anything — checking entry names and sizes off
+        // the central directory (cheap metadata) rather than re-reading
+        // every page's full content a second time, which would reintroduce
+        // the exact memory problem this whole rewrite avoids.
+        $verifyOk = MiniZip::withEntries($tmpPath, function ($fh, array $entries) use ($expectedSizes) {
+            if (count($entries) !== count($expectedSizes)) {
+                return false;
+            }
+            foreach ($expectedSizes as $name => $size) {
+                if (!isset($entries[$name]) || $entries[$name]['uncompSize'] !== $size) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        if ($verifyOk !== true) {
             @unlink($tmpPath);
             return ['ok' => false, 'error' => "La nouvelle archive n'a pas pu être vérifiée après écriture — annulé, le fichier d'origine n'a pas été touché."];
-        }
-        foreach ($newEntries as $name => $data) {
-            if (!isset($verify[$name]) || $verify[$name] !== $data) {
-                @unlink($tmpPath);
-                return ['ok' => false, 'error' => "La nouvelle archive ne correspond pas à ce qui a été demandé — annulé, le fichier d'origine n'a pas été touché."];
-            }
         }
 
         if (!@rename($tmpPath, $absolutePath)) {
@@ -103,6 +152,6 @@ final class CbzEditor
             return ['ok' => false, 'error' => "Impossible de remplacer le fichier d'origine sur le disque."];
         }
 
-        return ['ok' => true, 'pageCount' => $pageCount];
+        return ['ok' => true, 'pageCount' => count($expectedSizes) - 1]; // -1: ComicInfo.xml isn't a page
     }
 }
