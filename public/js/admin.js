@@ -1126,7 +1126,7 @@
 
   function treeNodeHtml(type, libraryId, label, path, count) {
     return `
-      <div class="tree-node" data-tree-type="${esc(type)}" data-tree-lib="${libraryId}" data-tree-path='${esc(JSON.stringify(path))}'>
+      <div class="tree-node" data-tree-type="${esc(type)}" data-tree-lib="${libraryId}" data-tree-path="${encodeURIComponent(JSON.stringify(path))}">
         <div class="tree-row">
           <button type="button" class="tree-toggle" data-tree-toggle aria-label="${esc(t('admin.expand'))}">+</button>
           <span class="tree-label">${esc(label)}${count != null ? ` <span class="text-muted">(${count})</span>` : ''}</span>
@@ -1157,7 +1157,7 @@
     });
     container.querySelectorAll(':scope > [data-tree-see-all]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const ctx = JSON.parse(btn.dataset.treeSeeAll);
+        const ctx = JSON.parse(decodeURIComponent(btn.dataset.treeSeeAll));
         objState.library_id = String(ctx.libraryId);
         objState.type = ctx.type;
         objState.path = ctx.path;
@@ -1185,7 +1185,7 @@
 
     const type = nodeEl.dataset.treeType;
     const libraryId = nodeEl.dataset.treeLib;
-    const path = JSON.parse(nodeEl.dataset.treePath);
+    const path = JSON.parse(decodeURIComponent(nodeEl.dataset.treePath));
     const pathParam = encodeURIComponent(JSON.stringify(path));
     toggleBtn.disabled = true;
     childrenEl.innerHTML = `<p class="text-muted tree-loading">${esc(t('common.loading'))}</p>`;
@@ -1202,13 +1202,13 @@
         // full paginated view for anything beyond that.
         html += standalone.items.slice(0, 30).map(treeItemRowHtml).join('');
         if (standalone.total > 30) {
-          html += `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all='${esc(JSON.stringify({ type, libraryId, path }))}'>${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
+          html += `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all="${encodeURIComponent(JSON.stringify({ type, libraryId, path }))}">${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
         }
       } else if (standalone.total > 0) {
         // A true leaf — no subfolders at all. Never rendered inline here,
         // however many there are: this is exactly the flat paginated view's
         // job, not the tree's.
-        html = `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all='${esc(JSON.stringify({ type, libraryId, path }))}'>${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
+        html = `<button type="button" class="btn btn-ghost btn-sm" data-tree-see-all="${encodeURIComponent(JSON.stringify({ type, libraryId, path }))}">${esc(t('admin.see_all_n', { count: standalone.total }))}</button>`;
       }
       childrenEl.innerHTML = html || `<p class="text-muted tree-loading">${esc(t('admin.no_object_found'))}</p>`;
       childrenEl.dataset.loaded = '1';
