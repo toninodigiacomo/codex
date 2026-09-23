@@ -328,5 +328,7 @@ docker compose up -d
 The container also checks for `pdo_sqlite`, `simplexml`, `poppler-utils` (PDF rendering), and `gd` (thumbnail resizing) at startup and installs whichever is missing - GD needs its own system libraries (`libpng-dev`/`libjpeg-dev`/`libwebp-dev`) the base image doesn't ship, so it's compiled the same "check and install what's missing" way as the rest rather than baked into a custom image.  
 **None of these checks can block Apache from starting** - each step in the startup command is independent (`|| true` / `|| echo 'WARN: ...'` rather than a single `&&`-chained pipeline), and the final step is `exec apache2-foreground`.  
 
+---
+
 ## License
 **GNU GPL v3.0** [LICENCE.md](https://github.com/toninodigiacomo/codex/blob/ced88567378bde78b3d0e61ee955449f240510e1/LICENSE.md)
