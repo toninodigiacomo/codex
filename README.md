@@ -1,3 +1,5 @@
+<p align="center"><img src="public/assets/icons/icon-192.png" width="140" alt="Vigie logo"></p>
+
 # Codex
 A personal ebook/comic library server (Ubooquity-style), running on `php:8.2-apache` via `compose.yml` with no custom Docker image.
 
