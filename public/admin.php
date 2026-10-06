@@ -6,10 +6,13 @@ AppLog::bootstrap();
 require_once __DIR__ . '/../src/Asset.php';
 require_once __DIR__ . '/../src/I18n.php';
 require_once __DIR__ . '/../src/Theme.php';
+require_once __DIR__ . '/../src/License.php';
 Auth::bootSession();
 I18n::boot();
 Auth::requireAdmin();
 $me = Auth::currentUser();
+// Same tab slot either way: "Premium" (enter a key) until a valid key is stored, then "IA".
+$premium = License::isActive();
 ?>
 <!DOCTYPE html>
 <html lang="<?= htmlspecialchars(I18n::locale()) ?>" data-theme="<?= htmlspecialchars(Theme::current()) ?>">
@@ -45,6 +48,7 @@ $me = Auth::currentUser();
       <button class="admin-tab active" data-tab="users"><?= htmlspecialchars(t('admin.tab_users')) ?></button>
       <button class="admin-tab" data-tab="libraries"><?= htmlspecialchars(t('admin.tab_libraries')) ?></button>
       <button class="admin-tab" data-tab="objects"><?= htmlspecialchars(t('admin.tab_objects')) ?></button>
+      <button class="admin-tab" data-tab="<?= $premium ? 'ai' : 'premium' ?>"><?= htmlspecialchars(t($premium ? 'admin.tab_ai' : 'admin.tab_premium')) ?></button>
       <button class="admin-tab" data-tab="settings"><?= htmlspecialchars(t('admin.tab_settings')) ?></button>
       <button class="admin-tab" data-tab="maintenance"><?= htmlspecialchars(t('admin.tab_maintenance')) ?></button>
       <button class="admin-tab" data-tab="system"><?= htmlspecialchars(t('admin.tab_system')) ?></button>
@@ -53,6 +57,8 @@ $me = Auth::currentUser();
     <section id="panel-users" class="admin-panel"></section>
     <section id="panel-libraries" class="admin-panel" hidden></section>
     <section id="panel-objects" class="admin-panel" hidden></section>
+    <section id="panel-ai" class="admin-panel" hidden></section>
+    <section id="panel-premium" class="admin-panel" hidden></section>
     <section id="panel-settings" class="admin-panel" hidden></section>
     <section id="panel-maintenance" class="admin-panel" hidden></section>
     <section id="panel-system" class="admin-panel" hidden></section>

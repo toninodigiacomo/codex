@@ -103,6 +103,22 @@ final class LibraryScanner
         $unchanged = 0;
         $conflicted = [];
 
+        // What the progress line ("done / total") is measured against: the files
+        // this library can actually turn into an item, or already has one for.
+        // walk() returns every file with a known extension — including formats
+        // the library's type refuses further down (the page images of a comic
+        // that was unpacked instead of zipped, a stray scan...) — and counting
+        // those made "4400 / 5249" a progress line that could never reach its
+        // end: 849 files were counted that no sync could ever do anything with.
+        $acceptedFormats = self::TYPE_ALLOWED_FORMATS[$library['type']] ?? null;
+        $total = 0;
+        foreach ($foundFiles as $absPath) {
+            $relPath = trim(substr($absPath, strlen($libraryRoot)), '/');
+            if (isset($existing[$relPath]) || self::formatAllowed($acceptedFormats, $absPath)) {
+                $total++;
+            }
+        }
+
         foreach ($foundFiles as $absPath) {
             $relPath = trim(substr($absPath, strlen($libraryRoot)), '/');
             $currentSize = @filesize($absPath);
@@ -137,7 +153,7 @@ final class LibraryScanner
 
                 $item = Items::find((int) $row['id']);
                 if ($item !== null) {
-                    LibraryJobs::working($library['id'], 'sync', $unchanged + $added + $updated, count($foundFiles), $row['title']);
+                    LibraryJobs::working($library['id'], 'sync', $unchanged + $added + $updated, $total, $row['title']);
                     AppLog::note("sync: item {$row['id']} ({$relPath}) modifié sur le disque, ré-extraction en cours");
                     ItemEnrichment::run($item);
                     Items::update((int) $row['id'], [
@@ -198,7 +214,7 @@ final class LibraryScanner
             // backfilling anything that predates this).
             $newItem = Items::find($newId);
             if ($newItem !== null) {
-                LibraryJobs::working($library['id'], 'sync', $unchanged + $added + $updated, count($foundFiles), $title);
+                LibraryJobs::working($library['id'], 'sync', $unchanged + $added + $updated, $total, $title);
                 AppLog::note("sync: item {$newItem['id']} ({$relPath}) en cours");
                 ItemEnrichment::run($newItem);
                 AppLog::note("sync: item {$newItem['id']} ok");
@@ -214,7 +230,104 @@ final class LibraryScanner
 
         $pdo->prepare('UPDATE libraries SET last_synced_at = ? WHERE id = ?')->execute([date('c'), $library['id']]);
 
-        return ['added' => $added, 'updated' => $updated, 'unchanged' => $unchanged, 'total' => count($foundFiles), 'conflicted' => $conflicted, 'orphaned' => $orphaned];
+        return ['added' => $added, 'updated' => $updated, 'unchanged' => $unchanged, 'total' => $total, 'conflicted' => $conflicted, 'orphaned' => $orphaned];
+    }
+
+    /** Whether a library's type accepts creating a *new* item from this file (null = no restriction). */
+    private static function formatAllowed(?array $allowed, string $absPath): bool
+    {
+        if ($allowed === null) {
+            return true;
+        }
+        $ext = strtolower(pathinfo($absPath, PATHINFO_EXTENSION));
+        $format = self::EXTENSION_FORMATS[$ext] ?? $ext;
+        return in_array($format, $allowed, true);
+    }
+
+    /**
+     * Read-only twin of sync(): walks the library's folder and diffs it against
+     * the database the way sync() would — same walk, same exclude pattern, same
+     * format rule — but creates nothing, enriches nothing and deletes nothing.
+     * It exists so the Cohérence tab can show, durably, what sync() only
+     * reports in the result box right after a run:
+     *  - orphaned: indexed items whose file is gone from the disk
+     *  - unindexed: files a sync would add (eligible, not in the database)
+     *  - conflicted: eligible files whose exact path is already held by an
+     *    item of another library (items.path is unique across all of them)
+     *  - rejected: files whose format this library's type refuses, grouped by
+     *    folder — typically a comic unpacked into its page images
+     * @return array{found: int, eligible: int, orphaned: array<int, array{id:int, title:string, path:string}>, unindexed: array<int, string>, conflicted: array<int, array{path:string, owner_library_id:?int, owner_library_name:?string}>, rejected: array<string, array{count:int, extensions:array<int, string>}>}
+     */
+    public static function inspect(array $library): array
+    {
+        $pdo = Database::connection();
+        $root = Paths::resolve($library['path']);
+        $libraryRoot = Paths::libraryRoot();
+
+        $existing = [];
+        $stmt = $pdo->prepare('SELECT id, title, path FROM items WHERE library_id = ?');
+        $stmt->execute([$library['id']]);
+        foreach ($stmt->fetchAll() as $row) {
+            $existing[$row['path']] = $row;
+        }
+
+        $foundFiles = [];
+        if (is_dir($root)) {
+            self::walk($root, $foundFiles, 0, Settings::scanExcludePattern());
+        }
+
+        $accepted = self::TYPE_ALLOWED_FORMATS[$library['type']] ?? null;
+        $owner = $pdo->prepare('SELECT items.library_id AS lid, libraries.name AS lname FROM items LEFT JOIN libraries ON libraries.id = items.library_id WHERE items.path = ?');
+        $unindexed = [];
+        $conflicted = [];
+        $rejected = [];
+        $eligible = 0;
+
+        foreach ($foundFiles as $absPath) {
+            $rel = trim(substr($absPath, strlen($libraryRoot)), '/');
+            if (isset($existing[$rel])) {
+                unset($existing[$rel]); // present on disk — not orphaned
+                $eligible++;
+                continue;
+            }
+            if (!self::formatAllowed($accepted, $absPath)) {
+                $folder = dirname($rel);
+                $rejected[$folder]['count'] = ($rejected[$folder]['count'] ?? 0) + 1;
+                $rejected[$folder]['extensions'][strtolower(pathinfo($absPath, PATHINFO_EXTENSION))] = true;
+                continue;
+            }
+            $eligible++;
+            $owner->execute([$rel]);
+            $held = $owner->fetch();
+            if ($held) {
+                $conflicted[] = [
+                    'path' => $rel,
+                    'owner_library_id' => $held['lid'] !== null ? (int) $held['lid'] : null,
+                    'owner_library_name' => $held['lname'],
+                ];
+            } else {
+                $unindexed[] = $rel;
+            }
+        }
+
+        foreach ($rejected as $folder => $info) {
+            $exts = array_keys($info['extensions']);
+            sort($exts);
+            $rejected[$folder]['extensions'] = $exts;
+        }
+        $orphaned = [];
+        foreach ($existing as $row) {
+            $orphaned[] = ['id' => (int) $row['id'], 'title' => (string) $row['title'], 'path' => (string) $row['path']];
+        }
+
+        return [
+            'found' => count($foundFiles),
+            'eligible' => $eligible,
+            'orphaned' => $orphaned,
+            'unindexed' => $unindexed,
+            'conflicted' => $conflicted,
+            'rejected' => $rejected,
+        ];
     }
 
     /** @param array<int, string> $found */

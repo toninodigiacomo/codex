@@ -33,6 +33,14 @@ final class Series
         if ($id !== false) {
             return (int) $id;
         }
+        // No series spelled exactly like this — but it may be an old spelling
+        // of one that was merged into another (see merge()).
+        $stmt = $pdo->prepare('SELECT series_id FROM series_aliases WHERE alias = ?');
+        $stmt->execute([$name]);
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return (int) $id;
+        }
         return self::create(['name' => $name]);
     }
 
@@ -69,6 +77,70 @@ final class Series
         }
         $stmt = Database::connection()->prepare('UPDATE series SET ' . implode(', ', $sets) . ' WHERE id = :id');
         $stmt->execute($params);
+    }
+
+    /**
+     * Folds series $fromId into $intoId: every item of the first now points at
+     * the second, whatever description/cover/type the second lacks is taken
+     * from the first, and the first is deleted. Its name is kept as an alias
+     * (and any alias already pointing at it is re-pointed) so that re-reading
+     * a file whose ComicInfo.xml still carries the old spelling lands on
+     * $intoId rather than quietly re-creating the series that was just merged.
+     * All or nothing — a failure part-way leaves both series untouched.
+     * @return array{moved: int}
+     */
+    public static function merge(int $fromId, int $intoId): array
+    {
+        if ($fromId === $intoId) {
+            throw new InvalidArgumentException('Impossible de fusionner une série avec elle-même');
+        }
+        $from = self::find($fromId);
+        $into = self::find($intoId);
+        if ($from === null || $into === null) {
+            throw new InvalidArgumentException('Série introuvable');
+        }
+
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('UPDATE items SET series_id = ? WHERE series_id = ?');
+            $stmt->execute([$intoId, $fromId]);
+            $moved = $stmt->rowCount();
+
+            foreach (['type', 'description', 'cover_path'] as $column) {
+                $missing = $into[$column] === null || trim((string) $into[$column]) === '';
+                $available = $from[$column] !== null && trim((string) $from[$column]) !== '';
+                if ($missing && $available) {
+                    $pdo->prepare("UPDATE series SET $column = ? WHERE id = ?")->execute([$from[$column], $intoId]);
+                }
+            }
+
+            $pdo->prepare('UPDATE series_aliases SET series_id = ? WHERE series_id = ?')->execute([$intoId, $fromId]);
+            $pdo->prepare('INSERT OR REPLACE INTO series_aliases (alias, series_id) VALUES (?, ?)')->execute([$from['name'], $intoId]);
+            $pdo->prepare('DELETE FROM series WHERE id = ?')->execute([$fromId]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        return ['moved' => $moved];
+    }
+
+    /** Deletes a series only if no item points at it — for clearing out empty ones; a series that still has fiches is merged instead. */
+    public static function deleteIfEmpty(int $id): void
+    {
+        if (self::find($id) === null) {
+            throw new InvalidArgumentException('Série introuvable');
+        }
+        $stmt = Database::connection()->prepare('SELECT COUNT(*) FROM items WHERE series_id = ?');
+        $stmt->execute([$id]);
+        $n = (int) $stmt->fetchColumn();
+        if ($n > 0) {
+            throw new InvalidArgumentException("Cette série contient encore $n fiche(s) : fusionne-la plutôt que de la supprimer");
+        }
+        self::delete($id);
     }
 
     public static function delete(int $id): void

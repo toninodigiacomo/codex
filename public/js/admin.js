@@ -40,6 +40,8 @@
     users: document.getElementById('panel-users'),
     libraries: document.getElementById('panel-libraries'),
     objects: document.getElementById('panel-objects'),
+    ai: document.getElementById('panel-ai'),
+    premium: document.getElementById('panel-premium'),
     settings: document.getElementById('panel-settings'),
     maintenance: document.getElementById('panel-maintenance'),
     system: document.getElementById('panel-system'),
@@ -54,6 +56,8 @@
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
       if (key === 'objects') renderObjectsTab();
+      if (key === 'ai') renderAiTab();
+      if (key === 'premium') renderPremiumTab();
       if (key === 'settings') renderSettingsTab();
       if (key === 'maintenance') renderMaintenanceTab();
       if (key === 'system') renderSystemTab();
@@ -1518,6 +1522,469 @@
         saveBtn.textContent = t('admin.cbz_save');
       }
     });
+  }
+
+  // ============================================================
+  // IA — everything "smart" about the catalogue lives under this tab. Today that is
+  // Cohérence: rule-based checks (src/Coherence.php), no model involved — the layer an
+  // AI pass will later build on. Further sections (timeline, assistant) get added to
+  // renderAiTab(). The whole tab is meant to sit behind a Premium licence key: when that
+  // lands, gate the /api/coherence routes server-side as well — hiding the tab alone
+  // would protect nothing.
+  // ============================================================
+  async function renderAiTab() {
+    panels.ai.innerHTML = '<div id="aiLicense"></div><div id="aiCoherence"></div>';
+    renderLicenseCard(document.getElementById('aiLicense')); // cosmetic: not waited for
+    await renderCoherenceSection(document.getElementById('aiCoherence'));
+  }
+
+  // "2027-10-04" -> a date in the admin's language, without a timezone shifting the day
+  function licenseDate(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(document.documentElement.lang || undefined, { timeZone: 'UTC' });
+  }
+
+  // Who the licence is for, and what the vendor's update source will still deliver. It never
+  // says anything is switched off: an expired or revoked key stops updates, not what is installed.
+  async function renderLicenseCard(box) {
+    if (!box) return;
+    try {
+      const s = await api('GET', '/api/license');
+      if (!s.active) return;
+      const updates = s.updates_until === null ? t('license.updates_open')
+        : s.updates_current ? t('license.updates_until', { date: licenseDate(s.updates_until) })
+          : t('license.updates_expired', { date: licenseDate(s.updates_until) });
+      box.innerHTML = `<div class="admin-card coh-license">
+          <div class="coh-license-title">${esc(t('license.card_title'))}</div>
+          <div class="coh-detail">${esc(t('license.licensee', { name: s.licensee, id: s.id }))}</div>
+          ${s.bound ? `<div class="coh-detail">${esc(t('license.bound', { id: s.installation_id }))}</div>` : ''}
+          <div class="coh-detail">${esc(updates)}</div>
+        </div>`;
+    } catch (_) { /* the card is informative only */ }
+  }
+
+  // Shown instead of the IA tab until a valid key has been entered.
+  async function renderPremiumTab() {
+    const panel = panels.premium;
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+    let status;
+    let request;
+    try {
+      [status, request] = await Promise.all([api('GET', '/api/license'), api('GET', '/api/license/request')]);
+    } catch (err) {
+      panel.innerHTML = `<p class="status-fail">${esc(err.message)}</p>`;
+      return;
+    }
+    const off = status.configured ? '' : ' disabled';
+    const stored = status.stored_key_invalid
+      ? `<p class="status-fail">${esc(t(status.stored_key_reason === 'wrong_installation' ? 'premium.stored_other_install' : 'premium.stored_invalid'))}</p>` : '';
+    panel.innerHTML = `
+      <div class="admin-card">
+        <div class="admin-card-head"><h2>${esc(t('premium.heading'))}</h2></div>
+        <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('premium.intro'))}</p>
+        ${status.configured ? '' : `<p class="status-fail">${esc(t('premium.not_configured'))}</p>`}
+        ${stored}
+        <label for="premiumKey" class="text-muted" style="font-size:13px;">${esc(t('premium.key_label'))}</label>
+        <textarea class="input" id="premiumKey" rows="4" spellcheck="false" autocomplete="off" placeholder="CDX1.…" style="font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;"${off}></textarea>
+        <div class="coh-toolbar">
+          <button type="button" class="btn btn-primary btn-sm" id="premiumActivate"${off}>${esc(t('premium.activate'))}</button>
+          <span id="premiumMsg" class="text-muted" style="font-size:13px;"></span>
+        </div>
+        <p class="text-muted" style="font-size:12.5px;">${esc(t('premium.note'))}</p>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-head"><h2>${esc(t('premium.request_heading'))}</h2></div>
+        <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('premium.request_intro'))}</p>
+        <div class="coh-detail">${esc(t('premium.installation_id'))} <span class="coh-mono">${esc(request.installation_id)}</span></div>
+        <textarea class="input" id="premiumRequest" rows="3" readonly spellcheck="false" style="font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; margin-top: 8px;">${esc(request.request)}</textarea>
+        <div class="coh-toolbar">
+          <button type="button" class="btn btn-secondary btn-sm" id="premiumCopy">${esc(t('premium.copy'))}</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="premiumDownload">${esc(t('premium.download'))}</button>
+          <span id="premiumCopyMsg" class="text-muted" style="font-size:13px;"></span>
+        </div>
+      </div>`;
+    const btn = document.getElementById('premiumActivate');
+    const input = document.getElementById('premiumKey');
+    const msg = document.getElementById('premiumMsg');
+    btn.addEventListener('click', async () => {
+      if (!input.value.trim()) { msg.className = 'status-fail'; msg.textContent = t('premium.empty_key'); return; }
+      btn.disabled = true;
+      msg.className = 'text-muted';
+      msg.textContent = t('premium.activating');
+      try {
+        await api('POST', '/api/license', { key: input.value });
+        showToast(t('premium.activated'));
+        // The tab turns into "IA" in place — same button, new target, no page reload.
+        const tabBtn = document.querySelector('.admin-tab[data-tab="premium"]');
+        tabBtn.dataset.tab = 'ai';
+        tabBtn.textContent = t('admin.tab_ai');
+        tabBtn.click();
+      } catch (err) {
+        msg.className = 'status-fail';
+        msg.textContent = err.message;
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('premiumCopy').addEventListener('click', async () => {
+      const box = document.getElementById('premiumRequest');
+      const note = document.getElementById('premiumCopyMsg');
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(box.value);
+        else { box.select(); document.execCommand('copy'); }
+        note.textContent = t('premium.copied');
+      } catch (_) { box.select(); }
+    });
+    document.getElementById('premiumDownload').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([request.request + '\n'], { type: 'text/plain' }));
+      a.download = 'codex-demande-licence.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+  }
+
+  const COH_PAGE = 50;
+  const COH_GROUPS = ['inconsistency', 'files', 'info'];
+  // Kept between visits to the tab, so coming back lands where the admin left off.
+  const coh = {
+    rules: [], counts: {}, libraries: [],
+    libraryId: '', rule: null, showDismissed: false,
+    findings: [], total: 0, diskCounts: {}, seq: 0,
+  };
+
+  const cohRule = (id) => coh.rules.find((r) => r.id === id);
+  const cohLibName = (id) => {
+    if (id === null || id === undefined) return '—';
+    const l = coh.libraries.find((x) => Number(x.id) === Number(id));
+    return l ? l.name : String(id);
+  };
+  const cohScope = () => (coh.libraryId === '' ? t('coherence.no_library_scope') : cohLibName(coh.libraryId));
+  const cohDiskKey = (rule) => `${rule}:${coh.libraryId}`;
+
+  async function renderCoherenceSection(panel) {
+    panel.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+    try {
+      const [summary, libraries] = await Promise.all([api('GET', '/api/coherence'), api('GET', '/api/libraries')]);
+      coh.rules = summary.rules;
+      coh.counts = summary.counts;
+      coh.libraries = libraries;
+      coh.diskCounts = {};
+      if (coh.libraryId !== '' && !libraries.some((l) => String(l.id) === String(coh.libraryId))) coh.libraryId = '';
+      const options = [`<option value="">${esc(t('coherence.all_libraries'))}</option>`]
+        .concat(libraries.map((l) => `<option value="${Number(l.id)}"${String(l.id) === String(coh.libraryId) ? ' selected' : ''}>${esc(l.name)}</option>`))
+        .join('');
+      panel.innerHTML = `
+        <div class="admin-card">
+          <div class="admin-card-head"><h2>${esc(t('coherence.heading'))}</h2></div>
+          <p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('coherence.hint'))}</p>
+          <div class="coh-toolbar">
+            <label for="cohLibrary" class="text-muted" style="font-size:13px;">${esc(t('coherence.library'))}</label>
+            <select class="input" id="cohLibrary" style="max-width:280px;">${options}</select>
+            <button type="button" class="btn btn-secondary btn-sm" id="cohRefresh">${esc(t('coherence.refresh'))}</button>
+          </div>
+          <div id="cohRules"></div>
+        </div>
+        <div class="admin-card" id="cohResults"></div>`;
+      document.getElementById('cohLibrary').addEventListener('change', (e) => {
+        coh.libraryId = e.target.value;
+        renderCohRules();
+        if (coh.rule) loadCohFindings(true); else renderCohResults();
+      });
+      document.getElementById('cohRefresh').addEventListener('click', () => renderCoherenceSection(panel));
+      document.getElementById('cohRules').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-coh-rule]');
+        if (b) selectCohRule(b.dataset.cohRule);
+      });
+      const results = document.getElementById('cohResults');
+      results.addEventListener('click', onCohResultsClick);
+      results.addEventListener('change', (e) => {
+        if (e.target.id === 'cohShowDismissed') { coh.showDismissed = e.target.checked; loadCohFindings(true); }
+      });
+      renderCohRules();
+      if (coh.rule) loadCohFindings(true); else renderCohResults();
+    } catch (err) {
+      panel.innerHTML = `<p class="status-fail">${esc(err.message)}</p>`;
+    }
+  }
+
+  function cohPill(n, severity) {
+    return `<span class="coh-count${n === 0 ? ' zero' : severity === 'warning' ? ' warn' : ''}">${Number(n)}</span>`;
+  }
+
+  function cohRuleSide(r) {
+    if (r.needs_disk) {
+      if (coh.libraryId === '') return `<span>${esc(t('coherence.pick_library'))}</span>`;
+      const n = coh.diskCounts[cohDiskKey(r.id)];
+      return n === undefined ? `<span>${esc(t('coherence.check'))}</span>` : cohPill(n, r.severity);
+    }
+    const c = coh.counts[r.id];
+    if (!c) return '';
+    const n = coh.libraryId === '' ? c.total : (c.by_library[coh.libraryId] || 0);
+    const dismissed = coh.libraryId === '' && c.dismissed > 0
+      ? `<span>${esc(t('coherence.dismissed_count', { count: c.dismissed }))}</span>` : '';
+    return dismissed + cohPill(n, r.severity);
+  }
+
+  function renderCohRules() {
+    const box = document.getElementById('cohRules');
+    if (!box) return;
+    const groupHints = { files: t('coherence.group.files_hint'), info: t('coherence.group.info_hint') };
+    box.innerHTML = COH_GROUPS.map((g) => {
+      const rows = coh.rules.filter((r) => r.group === g).map((r) => `
+        <button type="button" class="coh-rule${coh.rule === r.id ? ' active' : ''}" data-coh-rule="${esc(r.id)}">
+          <span class="coh-rule-text">
+            <span class="coh-rule-label">${esc(t('coherence.rule.' + r.id))}</span>
+            <span class="coh-rule-hint">${esc(t('coherence.rule.' + r.id + '_hint'))}</span>
+          </span>
+          <span class="coh-rule-side">${cohRuleSide(r)}</span>
+        </button>`).join('');
+      return `<div class="coh-group-title">${esc(t('coherence.group.' + g))}</div>`
+        + (groupHints[g] ? `<p class="coh-group-hint">${esc(groupHints[g])}</p>` : '')
+        + rows;
+    }).join('');
+  }
+
+  function selectCohRule(id) {
+    coh.rule = id;
+    coh.showDismissed = false;
+    renderCohRules();
+    loadCohFindings(true);
+  }
+
+  async function loadCohFindings(reset) {
+    const rule = cohRule(coh.rule);
+    const results = document.getElementById('cohResults');
+    if (!rule || !results) return;
+    if (rule.needs_disk && coh.libraryId === '') {
+      coh.seq++;
+      coh.findings = [];
+      coh.total = 0;
+      renderCohResults();
+      return;
+    }
+    const mySeq = ++coh.seq; // a slower, older request must never overwrite a newer one
+    if (reset) {
+      coh.findings = [];
+      coh.total = 0;
+      results.innerHTML = `<p class="text-muted">${esc(t('common.loading'))}</p>`;
+    }
+    const qs = new URLSearchParams({
+      offset: String(reset ? 0 : coh.findings.length),
+      limit: String(rule.needs_disk ? 1000 : COH_PAGE),
+    });
+    if (coh.libraryId !== '') qs.set('library_id', coh.libraryId);
+    if (coh.showDismissed) qs.set('dismissed', '1');
+    try {
+      const res = await api('GET', `/api/coherence/${encodeURIComponent(rule.id)}?${qs}`);
+      if (mySeq !== coh.seq) return;
+      coh.findings = reset ? res.findings : coh.findings.concat(res.findings);
+      coh.total = res.total;
+      if (rule.needs_disk && !coh.showDismissed) coh.diskCounts[cohDiskKey(rule.id)] = res.total;
+      renderCohRules();
+      renderCohResults();
+    } catch (err) {
+      if (mySeq === coh.seq) results.innerHTML = `<p class="status-fail">${esc(err.message)}</p>`;
+    }
+  }
+
+  async function refreshCohCounts() {
+    try {
+      const s = await api('GET', '/api/coherence');
+      coh.counts = s.counts;
+      renderCohRules();
+    } catch (_) { /* the pills are cosmetic — a failed refresh must not get in the way */ }
+  }
+
+  function cohItemLink(item, labelHtml) {
+    return `<a href="item.php?id=${Number(item.id)}">${labelHtml === undefined ? esc(item.title) : labelHtml}</a>`;
+  }
+
+  // Which way to merge: the suggested direction first (into the biggest series), the reverse
+  // as a second button when there are only two — the biggest spelling isn't always the right one.
+  function cohMergePairs(f) {
+    const targetId = Number(f.data.target_id !== undefined ? f.data.target_id : f.data.into_id);
+    const target = f.series.find((s) => Number(s.id) === targetId) || f.series[0];
+    const others = f.series.filter((s) => s !== target);
+    const pairs = others.map((s) => ({ from: s, into: target }));
+    if (f.series.length === 2) pairs.push({ from: target, into: others[0] });
+    return pairs;
+  }
+
+  // Findings whose title *is* the item: the label becomes the link to its fiche.
+  const COH_SINGLE_ITEM_RULES = [
+    'number_title_mismatch', 'number_empty_text', 'number_year_like', 'title_whitespace',
+    'title_control_chars', 'synopsis_missing', 'publisher_missing', 'cover_missing', 'file_missing',
+  ];
+
+  function cohFindingHtml(f, i) {
+    const detail = [];
+    const actions = [];
+    let label = esc(f.label);
+    const mono = (s) => `<span class="coh-mono">${esc(s)}</span>`;
+    switch (f.rule) {
+      case 'series_equivalent':
+      case 'series_similar':
+        detail.push(esc(t('coherence.detail.' + f.rule)));
+        detail.push(f.series.map((s) => `${esc(s.name)} <span class="text-muted">(${esc(t('coherence.fiches', { count: s.count }))})</span>`).join(' · '));
+        cohMergePairs(f).forEach((p) => actions.push(
+          `<button type="button" class="btn btn-secondary btn-sm" data-coh="merge" data-idx="${i}" data-from="${Number(p.from.id)}" data-into="${Number(p.into.id)}">${esc(t('coherence.merge_btn', { from: p.from.name, into: p.into.name }))}</button>`
+        ));
+        break;
+      case 'series_empty':
+        detail.push(esc(t('coherence.detail.series_empty')));
+        actions.push(`<button type="button" class="btn btn-danger btn-sm" data-coh="delete-series" data-idx="${i}">${esc(t('coherence.delete_series'))}</button>`);
+        break;
+      case 'number_duplicate':
+        detail.push(esc(t('coherence.detail.number_duplicate', { count: f.items_total })));
+        break;
+      case 'number_title_mismatch':
+        detail.push(esc(t('coherence.detail.number_title_mismatch', { title_numbers: f.data.title_numbers.join(', #'), issue_number: f.data.issue_number })));
+        break;
+      case 'number_empty_text':
+        detail.push(esc(t('coherence.detail.number_empty_text', { value: f.data.value })));
+        break;
+      case 'number_year_like':
+        detail.push(esc(t('coherence.detail.number_year_like', { value: f.data.value })));
+        break;
+      case 'title_whitespace':
+      case 'title_control_chars':
+        label = mono(f.label);
+        detail.push(`${esc(t('coherence.proposed'))} ${mono(f.data.suggested)}`);
+        actions.push(`<button type="button" class="btn btn-secondary btn-sm" data-coh="apply" data-idx="${i}">${esc(t('coherence.apply_title'))}</button>`);
+        break;
+      case 'publisher_variants':
+        detail.push(esc(t('coherence.detail.publisher_variants', { variants: f.data.variants.map((v) => `${v.name} (${v.count})`).join(' · ') })));
+        break;
+      case 'numbers_missing':
+        detail.push(esc(t('coherence.detail.numbers_missing', { present: f.data.present, from: f.data.from, to: f.data.to, missing: f.data.missing })));
+        break;
+      case 'file_missing':
+      case 'file_unindexed':
+        detail.push(mono(f.detail));
+        break;
+      case 'file_conflicted':
+        detail.push(mono(f.detail));
+        detail.push(esc(t('coherence.detail.file_conflicted', { library: cohLibName(f.data.owner_library_id) })));
+        break;
+      case 'files_rejected':
+        detail.push(mono(f.detail));
+        detail.push(esc(t('coherence.detail.files_rejected', { count: f.data.count, extensions: f.data.extensions.join(', ') })));
+        break;
+      default:
+        break;
+    }
+
+    let chips = '';
+    if (COH_SINGLE_ITEM_RULES.includes(f.rule) && f.items.length === 1) {
+      label = cohItemLink(f.items[0], label);
+    } else if (f.items.length) {
+      const shown = f.items.slice(0, 5);
+      const more = Math.max(0, f.items_total - shown.length);
+      chips = `<div class="coh-chips">${shown.map((it) => cohItemLink(it)).join('')}`
+        + (more ? `<span class="text-muted">${esc(t('coherence.more_items', { count: more }))}</span>` : '') + '</div>';
+    }
+
+    actions.push(`<button type="button" class="btn btn-secondary btn-sm" data-coh="${f.dismissed ? 'restore' : 'dismiss'}" data-idx="${i}">${esc(t(f.dismissed ? 'coherence.restore' : 'coherence.dismiss'))}</button>`);
+    return `<div class="coh-finding"><div class="coh-finding-main">
+        <div class="coh-finding-label">${label}</div>
+        ${detail.map((d) => `<div class="coh-detail">${d}</div>`).join('')}${chips}
+      </div><div class="coh-actions">${actions.join('')}</div></div>`;
+  }
+
+  function renderCohResults() {
+    const box = document.getElementById('cohResults');
+    if (!box) return;
+    const rule = cohRule(coh.rule);
+    if (!rule) {
+      box.innerHTML = `<p class="text-muted">${esc(t('coherence.select_rule'))}</p>`;
+      return;
+    }
+    const head = `<div class="admin-card-head"><h2>${esc(t('coherence.rule.' + rule.id))}</h2><span class="text-muted" style="font-size:13px;">${esc(t('coherence.results', { count: coh.total }))}</span></div>`;
+    if (rule.needs_disk && coh.libraryId === '') {
+      box.innerHTML = head + `<p class="text-muted">${esc(t('coherence.pick_library'))}</p>`;
+      return;
+    }
+    const bulk = coh.total > 0
+      ? `<button type="button" class="btn btn-secondary btn-sm" data-coh="${coh.showDismissed ? 'restore-all' : 'dismiss-all'}">${esc(t(coh.showDismissed ? 'coherence.restore_all' : 'coherence.dismiss_all', { count: coh.total }))}</button>`
+      : '';
+    const bar = `<div class="coh-results-bar"><label><input type="checkbox" id="cohShowDismissed"${coh.showDismissed ? ' checked' : ''} /> ${esc(t('coherence.show_dismissed'))}</label>${bulk}</div>`;
+    const list = coh.findings.length
+      ? coh.findings.map((f, i) => cohFindingHtml(f, i)).join('')
+      : `<p class="text-muted" style="margin-top:12px;">${esc(t('coherence.nothing'))}</p>`;
+    const more = coh.findings.length < coh.total
+      ? `<div style="margin-top:12px;"><button type="button" class="btn btn-secondary btn-sm" data-coh="more">${esc(t('coherence.more'))}</button></div>` : '';
+    box.innerHTML = head
+      + `<p class="text-muted" style="font-size:13px;margin-top:-6px;">${esc(t('coherence.rule.' + rule.id + '_hint'))}</p>`
+      + bar + list + more;
+  }
+
+  // One finding settled (ignored, restored, title fixed): drop it from the list in place
+  // rather than reloading — someone working through 117 titles shouldn't be sent back to
+  // the top of the list after every click.
+  function cohDropFinding(f) {
+    const idx = coh.findings.indexOf(f);
+    if (idx >= 0) coh.findings.splice(idx, 1);
+    coh.total = Math.max(0, coh.total - 1);
+    const rule = cohRule(coh.rule);
+    if (rule && rule.needs_disk && !coh.showDismissed) coh.diskCounts[cohDiskKey(rule.id)] = coh.total;
+    renderCohResults();
+    renderCohRules();
+    refreshCohCounts();
+  }
+
+  async function onCohResultsClick(e) {
+    const btn = e.target.closest('button[data-coh]');
+    if (!btn || btn.disabled) return;
+    const action = btn.dataset.coh;
+    const f = btn.dataset.idx !== undefined ? coh.findings[Number(btn.dataset.idx)] : null;
+    btn.disabled = true;
+    try {
+      if (action === 'more') { await loadCohFindings(false); return; }
+
+      if (action === 'dismiss-all' || action === 'restore-all') {
+        const dismissing = action === 'dismiss-all';
+        if (!confirm(t(dismissing ? 'coherence.confirm_dismiss_all' : 'coherence.confirm_restore_all', { count: coh.total, scope: cohScope() }))) return;
+        const body = { rule: coh.rule, all: true };
+        if (coh.libraryId !== '') body.library_id = Number(coh.libraryId);
+        const res = await api('POST', `/api/coherence/${dismissing ? 'dismiss' : 'restore'}`, body);
+        showToast(t(dismissing ? 'coherence.bulk_dismissed_toast' : 'coherence.bulk_restored_toast', { count: dismissing ? res.dismissed : res.restored }));
+        await loadCohFindings(true);
+        refreshCohCounts();
+        return;
+      }
+
+      if (!f) return;
+      let reload = false;
+      if (action === 'dismiss' || action === 'restore') {
+        await api('POST', `/api/coherence/${action}`, { rule: f.rule, keys: [f.key] });
+        showToast(t(action === 'dismiss' ? 'coherence.dismissed_toast' : 'coherence.restored_toast'));
+      } else if (action === 'apply') {
+        const res = await api('POST', '/api/coherence/fix-title', { item_id: f.items[0].id });
+        showToast(t(res.changed ? 'coherence.title_applied' : 'coherence.title_unchanged'));
+      } else if (action === 'merge') {
+        const from = f.series.find((s) => Number(s.id) === Number(btn.dataset.from));
+        const into = f.series.find((s) => Number(s.id) === Number(btn.dataset.into));
+        if (!from || !into) return;
+        if (!confirm(t('coherence.confirm_merge', { from: from.name, into: into.name, count: from.count }))) return;
+        const res = await api('POST', '/api/coherence/merge-series', { from_id: from.id, into_id: into.id });
+        showToast(t('coherence.merged', { count: res.moved, into: into.name }));
+        reload = true; // a merge reshapes other findings too (a group of three becomes a pair)
+      } else if (action === 'delete-series') {
+        if (!confirm(t('coherence.confirm_delete_series', { name: f.label }))) return;
+        await api('POST', '/api/coherence/delete-series', { id: f.series[0].id });
+        showToast(t('coherence.series_deleted'));
+        reload = true;
+      } else {
+        return;
+      }
+      if (reload) { await loadCohFindings(true); refreshCohCounts(); } else { cohDropFinding(f); }
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ============================================================

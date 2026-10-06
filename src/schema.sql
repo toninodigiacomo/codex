@@ -217,3 +217,27 @@ CREATE TABLE IF NOT EXISTS library_jobs (
   message    TEXT,                 -- set on status = 'error'
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- Findings the admin has marked "ignorer" in the Cohérence tab — a legitimate
+-- anomaly (two story arcs that both contain the same issue, an acronym title
+-- in capitals...) shouldn't keep coming back every time the analysis runs.
+-- finding_key is whatever stable identifier the rule gives its findings (an
+-- item id, a normalised series name, "series:number:library"...) — see
+-- Coherence.php; rows are just remembered, never acted on.
+CREATE TABLE IF NOT EXISTS coherence_dismissed (
+  rule         TEXT NOT NULL,
+  finding_key  TEXT NOT NULL,
+  dismissed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (rule, finding_key)
+);
+
+-- Old spellings of a series that was merged into another one. Series::findOrCreate
+-- matches names exactly (case- and accent-sensitive), so merging "Rose écarlate (La)"
+-- into "Rose Écarlate (La)" would be undone the next time a file whose ComicInfo.xml
+-- still says "Rose écarlate (La)" is (re-)extracted — the series would simply be
+-- created again. findOrCreate checks this table after an exact miss, so the old
+-- spelling keeps resolving to the merged series instead.
+CREATE TABLE IF NOT EXISTS series_aliases (
+  alias     TEXT PRIMARY KEY,
+  series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE
+);
