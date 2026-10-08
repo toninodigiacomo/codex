@@ -1,12 +1,11 @@
 # Folders #
 ###########
-*ressources*
-*tools*
+ressources/
+tools/
 
 # OS generated files #
 ######################
-.DS_Store
-.DS_Store?
+.DS*
 ._*
 .Spotlight-V100
 .Trashes
