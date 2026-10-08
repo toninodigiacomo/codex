@@ -1565,7 +1565,7 @@ try {
                     'total' => count($findings),
                     'offset' => $offset,
                     'limit' => $limit,
-                    'findings' => array_slice($findings, $offset, $limit),
+                    'findings' => Coherence::enrich(array_slice($findings, $offset, $limit)),
                 ]);
             }
 
@@ -1605,6 +1605,15 @@ try {
                 // this one only ever deletes a series nothing points at.
                 Series::deleteIfEmpty((int) (bodyJson()['id'] ?? 0));
                 respond(200, ['deleted' => true]);
+            }
+
+            if ($method === 'POST' && $rawSecondSegment === 'fix-number') {
+                respond(200, Coherence::fixNumber((int) (bodyJson()['item_id'] ?? 0)));
+            }
+
+            if ($method === 'POST' && $rawSecondSegment === 'fix-numbers') {
+                $lib = bodyJson()['library_id'] ?? null;
+                respond(200, ['fixed' => Coherence::fixNumbers($lib === null || $lib === '' ? null : (int) $lib)]);
             }
 
             respond(405, ['error' => 'Méthode non autorisée']);

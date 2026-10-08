@@ -565,7 +565,7 @@ return [
     'coherence.detail.series_empty' => 'No item points at this series.',
     'coherence.detail.number_duplicate' => '{count} items carry this number in the same library.',
     'coherence.detail.number_title_mismatch' => 'The title says #{title_numbers}, the item is numbered {issue_number}.',
-    'coherence.detail.number_empty_text' => 'The number is stored as text (“{value}”) instead of being empty.',
+    'coherence.detail.number_empty_text' => 'The number is text (“{value}”) rather than a number: fix it in the item form, or ignore this finding.',
     'coherence.detail.number_year_like' => 'Number {value}: a year read as an issue number?',
     'coherence.detail.numbers_missing' => '{present} numbers from #{from} to #{to}. Missing: {missing}',
     'coherence.detail.files_rejected' => '{count} file(s) ignored ({extensions}): probably a comic unpacked instead of zipped as .cbz.',
@@ -635,4 +635,28 @@ return [
     'premium.download' => 'Download',
     'premium.stored_other_install' => 'The stored key was issued for another Codex installation (database restored elsewhere?). Ask for a new key with the request code below.',
     'license.bound' => 'Key bound to this installation ({id}).',
+
+    // --- Cohérence : où sont rangées les choses ---
+    'coherence.tag_shared' => 'Items of both names are filed in the same folder',
+    'coherence.tag_distinct' => 'Different folders: nothing is filed together',
+    'coherence.folders_count' => '{count} folders',
+    'coherence.more_folders' => '+ {count} more folders',
+    'nav.admin_back' => 'Administration',
+
+    // --- Cohérence : numéros stockés comme texte ---
+    'coherence.detail.number_empty_blank' => 'The number is an empty text: invisible in the item form, but not the same as “no number”. “Fix” sets it to no number for good.',
+    'coherence.fix_number' => 'Fix',
+    'coherence.fix_numbers_all' => 'Fix all empty numbers',
+    'coherence.confirm_fix_numbers' => 'Set every empty number for “{scope}” back to “no number”? Numbers that are real text (like “Special issue”) are left alone.',
+    'coherence.number_fixed' => 'Number fixed.',
+    'coherence.numbers_fixed' => '{count} number(s) fixed.',
+
+    // --- Cohérence : en quoi deux noms diffèrent ---
+    'coherence.diff_label' => 'Difference:',
+    'coherence.diff_case' => 'upper / lower case',
+    'coherence.diff_accents' => 'accents',
+    'coherence.diff_punct' => 'punctuation or spaces',
+    'coherence.diff_other' => 'other (article, “&”, symbol…)',
+    'coherence.diff_typo' => 'a few letters (possible typo)',
+    'coherence.sample_files' => 'Show {shown} of {total} items',
 ];

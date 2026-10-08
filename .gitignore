@@ -1,6 +1,7 @@
 # Folders #
 ###########
-ressources/
+*ressources*
+*tools*
 
 # OS generated files #
 ######################

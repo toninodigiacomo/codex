@@ -24,8 +24,35 @@ final class Items
 
     private const SORTABLE = ['title', 'added_at', 'issue_number', 'filename'];
 
+    /**
+     * issue_number is a REAL column, and SQLite keeps whatever it cannot turn into a number as TEXT: an empty string would sit
+     * there as text — invisible in the form (it looks exactly like "no number"), yet not NULL, so sorted apart and flagged by the
+     * consistency checks. Blank therefore means "no number" (NULL), numeric text becomes a number, and anything else is refused
+     * rather than silently stored as text. One place for every write path (the form, the CBZ editor, the scanner).
+     * @param array<string, mixed> $fields
+     * @return array<string, mixed>
+     */
+    private static function normalizeFields(array $fields): array
+    {
+        if (array_key_exists('issue_number', $fields)) {
+            $v = $fields['issue_number'];
+            if (is_string($v)) {
+                $v = trim($v);
+            }
+            if ($v === null || $v === '') {
+                $fields['issue_number'] = null;
+            } elseif ((is_int($v) || is_float($v) || (is_string($v) && is_numeric($v))) && is_finite((float) $v)) {
+                $fields['issue_number'] = (float) $v;
+            } else {
+                throw new InvalidArgumentException('Le numéro doit être un nombre, ou rester vide.');
+            }
+        }
+        return $fields;
+    }
+
     public static function create(string $type, array $fields): int
     {
+        $fields = self::normalizeFields($fields);
         if (!in_array($type, ['comic', 'ebook', 'magazine', 'other'], true)) {
             throw new InvalidArgumentException("Type d'item invalide : $type");
         }
@@ -68,6 +95,7 @@ final class Items
         if (!$existing) {
             throw new RuntimeException("Item #$id introuvable");
         }
+        $fields = self::normalizeFields($fields);
 
         $pdo->beginTransaction();
         try {

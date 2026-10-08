@@ -29,12 +29,18 @@ Auth::requireLogin(); // item management is administration, not browsing — adm
 
 <div class="app-shell">
   <nav class="nav topbar">
-    <a href="library.php" class="nav-brand" style="text-decoration:none;">Codex</a>
 <?php
+// An admin can edit an item but cannot browse the catalogue, so a "Library" button would be a dead end for them: send them back
+// to the administration instead — to the exact place they came from when the link says so (adminback=ai/<rule>/<library>, checked).
+$isAdmin = Auth::isAdmin();
+$adminBack = (string) ($_GET['adminback'] ?? '');
+$adminHref = 'admin.php' . (preg_match('#^ai/[a-z_]{1,40}/[0-9]{0,9}$#D', $adminBack) ? '#' . $adminBack : '');
 $backContext = isset($_GET['back']) ? (string) $_GET['back'] : '';
-$backHref = $backContext !== '' ? 'library.php?restore=' . urlencode($backContext) : 'library.php';
+$backHref = $isAdmin ? $adminHref : ($backContext !== '' ? 'library.php?restore=' . urlencode($backContext) : 'library.php');
+$backLabel = $isAdmin ? t('nav.admin_back') : t('nav.library');
 ?>
-    <a href="<?= htmlspecialchars($backHref) ?>" class="btn btn-ghost"><?= htmlspecialchars(t('nav.library')) ?></a>
+    <a href="<?= htmlspecialchars($isAdmin ? $adminHref : 'library.php') ?>" class="nav-brand" style="text-decoration:none;">Codex</a>
+    <a href="<?= htmlspecialchars($backHref) ?>" class="btn btn-ghost"><?= htmlspecialchars($backLabel) ?></a>
   </nav>
 
   <main class="item-page" id="itemPage" data-user-role="<?= htmlspecialchars($_SESSION['role'] ?? '') ?>">

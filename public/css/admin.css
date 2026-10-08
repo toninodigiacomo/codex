@@ -171,5 +171,16 @@ label.orphan-row { cursor: pointer; }
   .coh-rule { flex-direction: column; align-items: flex-start; }
 }
 .coh-rule-label, .coh-rule-hint { display: block; }
+.coh-bulk { display: flex; gap: 8px; flex-wrap: wrap; }
+.coh-series { margin-top: 8px; }
+.coh-diff { background: rgba(255, 193, 7, 0.38); border-radius: 2px; padding: 0 1px; }
+.coh-files { margin: 4px 0 0 18px; padding: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.coh-sname { font-weight: 600; }
+.coh-place { margin: 2px 0 0; font-size: 12.5px; color: var(--color-neutral-300); overflow-wrap: anywhere; }
+.coh-place summary { cursor: pointer; }
+.coh-place ul { margin: 4px 0 0 18px; padding: 0; }
+.coh-lib { font-weight: 600; }
+.coh-dup { margin-top: 6px; }
+.coh-tag { display: inline-block; margin-top: 8px; padding: 1px 8px; font-size: 11.5px; border: 1px solid var(--color-divider); border-radius: 999px; }
 .coh-license { padding-top: 12px; padding-bottom: 12px; }
 .coh-license-title { font-weight: 600; font-size: 14px; }

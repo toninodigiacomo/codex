@@ -566,7 +566,7 @@ return [
     'coherence.detail.series_empty' => 'Aucune fiche ne pointe vers cette série.',
     'coherence.detail.number_duplicate' => '{count} fiches portent ce numéro dans la même bibliothèque.',
     'coherence.detail.number_title_mismatch' => 'Le titre indique #{title_numbers}, la fiche porte le numéro {issue_number}.',
-    'coherence.detail.number_empty_text' => 'Le numéro est stocké comme du texte (« {value} ») au lieu d\'être vide.',
+    'coherence.detail.number_empty_text' => 'Le numéro est du texte (« {value} ») et non un nombre : corrige-le dans la fiche, ou ignore ce constat.',
     'coherence.detail.number_year_like' => 'Numéro {value} : une année lue comme un numéro ?',
     'coherence.detail.numbers_missing' => '{present} numéros de #{from} à #{to}. Manquant : {missing}',
     'coherence.detail.files_rejected' => '{count} fichier(s) ignoré(s) ({extensions}) : probablement une BD décompressée au lieu d\'être zippée en .cbz.',
@@ -636,4 +636,28 @@ return [
     'premium.download' => 'Télécharger',
     'premium.stored_other_install' => 'La clé enregistrée a été émise pour une autre installation de Codex (base de données restaurée ailleurs ?). Demande une nouvelle clé avec le code de demande ci-dessous.',
     'license.bound' => 'Clé liée à cette installation ({id}).',
+
+    // --- Cohérence : où sont rangées les choses ---
+    'coherence.tag_shared' => 'Des fiches des deux noms sont rangées dans un même dossier',
+    'coherence.tag_distinct' => 'Dossiers distincts : rien n\'est rangé ensemble',
+    'coherence.folders_count' => '{count} dossiers',
+    'coherence.more_folders' => '+ {count} autres dossiers',
+    'nav.admin_back' => 'Administration',
+
+    // --- Cohérence : numéros stockés comme texte ---
+    'coherence.detail.number_empty_blank' => 'Le numéro est un texte vide : invisible dans la fiche, mais ce n\'est pas « aucun numéro ». « Corriger » le remet à vide pour de bon.',
+    'coherence.fix_number' => 'Corriger',
+    'coherence.fix_numbers_all' => 'Corriger tous les numéros vides',
+    'coherence.confirm_fix_numbers' => 'Remettre à « aucun numéro » tous les numéros vides pour « {scope} » ? Les numéros qui sont du vrai texte (comme « Hors-série ») ne sont pas touchés.',
+    'coherence.number_fixed' => 'Numéro corrigé.',
+    'coherence.numbers_fixed' => '{count} numéro(s) corrigé(s).',
+
+    // --- Cohérence : en quoi deux noms diffèrent ---
+    'coherence.diff_label' => 'Différence :',
+    'coherence.diff_case' => 'majuscules / minuscules',
+    'coherence.diff_accents' => 'accents',
+    'coherence.diff_punct' => 'ponctuation ou espaces',
+    'coherence.diff_other' => 'autre (article, « & », symbole…)',
+    'coherence.diff_typo' => 'quelques lettres (faute de frappe possible)',
+    'coherence.sample_files' => 'Voir {shown} fiches sur {total}',
 ];

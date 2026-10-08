@@ -53,6 +53,7 @@
       Object.entries(panels).forEach(([key, panel]) => { panel.hidden = key !== tab.dataset.tab; });
       const key = tab.dataset.tab;
       if (key !== 'libraries') stopJobPolling();
+      if (key !== 'ai' && /^#ai\//.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
       if (key === 'users') renderUsersTab();
       if (key === 'libraries') renderLibrariesTab();
       if (key === 'objects') renderObjectsTab();
@@ -1668,10 +1669,12 @@
     try {
       const [summary, libraries] = await Promise.all([api('GET', '/api/coherence'), api('GET', '/api/libraries')]);
       coh.rules = summary.rules;
+      if (coh.rule && !cohRule(coh.rule)) coh.rule = null; // a stale or mistyped #hash
       coh.counts = summary.counts;
       coh.libraries = libraries;
       coh.diskCounts = {};
       if (coh.libraryId !== '' && !libraries.some((l) => String(l.id) === String(coh.libraryId))) coh.libraryId = '';
+      cohSyncHash(); // the URL always says what is on screen (a stale library falls back to "all")
       const options = [`<option value="">${esc(t('coherence.all_libraries'))}</option>`]
         .concat(libraries.map((l) => `<option value="${Number(l.id)}"${String(l.id) === String(coh.libraryId) ? ' selected' : ''}>${esc(l.name)}</option>`))
         .join('');
@@ -1689,6 +1692,7 @@
         <div class="admin-card" id="cohResults"></div>`;
       document.getElementById('cohLibrary').addEventListener('change', (e) => {
         coh.libraryId = e.target.value;
+        cohSyncHash();
         renderCohRules();
         if (coh.rule) loadCohFindings(true); else renderCohResults();
       });
@@ -1746,8 +1750,24 @@
     }).join('');
   }
 
+  // Where the admin is in the IA tab (rule + library) lives in the URL hash: a link back from a fiche, or a reload, lands there.
+  function cohSyncHash() {
+    if (!coh.rule) return;
+    try { history.replaceState(null, '', `#ai/${coh.rule}/${coh.libraryId}`); } catch (_) { /* cosmetic */ }
+  }
+
+  function restoreFromHash() {
+    const m = /^#ai\/([a-z_]+)\/(\d*)$/.exec(location.hash);
+    const tab = document.querySelector('.admin-tab[data-tab="ai"]');
+    if (!m || !tab) return;
+    coh.rule = m[1];
+    coh.libraryId = m[2];
+    tab.click();
+  }
+
   function selectCohRule(id) {
     coh.rule = id;
+    cohSyncHash();
     coh.showDismissed = false;
     renderCohRules();
     loadCohFindings(true);
@@ -1797,9 +1817,78 @@
     } catch (_) { /* the pills are cosmetic — a failed refresh must not get in the way */ }
   }
 
+  // A fiche opens in a NEW tab: the list being worked through (and its scroll position) stays put. The link also says where it
+  // came from, so item.php can lead an admin straight back to this rule and library.
   function cohItemLink(item, labelHtml) {
-    return `<a href="item.php?id=${Number(item.id)}">${labelHtml === undefined ? esc(item.title) : labelHtml}</a>`;
+    const back = encodeURIComponent(`ai/${coh.rule || ''}/${coh.libraryId}`);
+    return `<a href="item.php?id=${Number(item.id)}&amp;adminback=${back}" target="_blank" rel="noopener">${labelHtml === undefined ? esc(item.title) : labelHtml}</a>`;
   }
+
+  const cohWhere = (it) => [it.library, it.path].filter(Boolean).join(' · ');
+
+  // Where a series is filed: library + the folder all its items share, with the full list one click away when it is spread out.
+  function cohPlaceHtml(p) {
+    const common = `${esc(p.common || '/')}${p.common ? '/' : ''}`;
+    const head = `<span class="coh-lib">${esc(p.library || '?')}</span> <span class="coh-mono">${common}</span>`;
+    if (p.folders_total <= 1) return `<div class="coh-place">${head}</div>`;
+    const more = p.folders_total > p.folders.length
+      ? `<li class="text-muted">${esc(t('coherence.more_folders', { count: p.folders_total - p.folders.length }))}</li>` : '';
+    return `<details class="coh-place"><summary>${head} <span class="text-muted">(${esc(t('coherence.folders_count', { count: p.folders_total }))})</span></summary>
+      <ul>${p.folders.map((f) => `<li><span class="coh-mono">${esc(f.folder || '/')}</span> <span class="text-muted">(${Number(f.count)})</span></li>`).join('')}${more}</ul></details>`;
+  }
+
+  // The characters of `a` that are not in `b` (longest common subsequence), as escaped HTML with <mark> around the odd ones: two names
+  // that differ by one capital letter or one dash are impossible to tell apart by eye.
+  function cohDiffHtml(a, b) {
+    const x = [...a];
+    const y = [...b];
+    if (x.length > 160 || y.length > 160) return esc(a);
+    const m = x.length;
+    const n = y.length;
+    const L = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    }
+    let i = 0;
+    let j = 0;
+    let out = '';
+    let open = false;
+    while (i < m) {
+      if (j < n && x[i] === y[j]) {
+        if (open) { out += '</mark>'; open = false; }
+        out += esc(x[i]); i++; j++;
+      } else if (j < n && L[i][j + 1] > L[i + 1][j]) {
+        j++; // a character only `b` has
+      } else {
+        if (!open) { out += '<mark class="coh-diff">'; open = true; }
+        out += esc(x[i]); i++;
+      }
+    }
+    return out + (open ? '</mark>' : '');
+  }
+
+  // What KIND of difference separates two names, from the most innocent to the least.
+  const cohStripAccents = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
+  function cohDiffKind(a, b, rule) {
+    if (rule === 'series_similar') return 'typo';
+    const low = (s) => s.toLocaleLowerCase();
+    if (low(a) === low(b)) return 'case';
+    if (low(cohStripAccents(a)) === low(cohStripAccents(b))) return 'accents';
+    const alnum = (s) => low(cohStripAccents(s)).replace(/[^\p{L}\p{N}]+/gu, '');
+    return alnum(a) === alnum(b) ? 'punct' : 'other';
+  }
+
+  // The first files of a series, so the admin can see which ones carry this name (all of them for a small series).
+  function cohFilesHtml(s) {
+    if (!s.sample || s.sample.length === 0) return '';
+    const li = s.sample.map((it) => `<li>${cohItemLink(it)} <span class="coh-mono text-muted">${esc(it.file)}</span></li>`).join('')
+      + (s.sample_more > 0 ? `<li class="text-muted">${esc(t('coherence.more_items', { count: s.sample_more }))}</li>` : '');
+    return s.sample_more > 0
+      ? `<details class="coh-place"><summary>${esc(t('coherence.sample_files', { shown: s.sample.length, total: s.count }))}</summary><ul class="coh-files">${li}</ul></details>`
+      : `<ul class="coh-files">${li}</ul>`;
+  }
+
+  const cohSeriesBlock = (s, ref) => `<div class="coh-series"><span class="coh-sname">${ref === undefined ? esc(s.name) : cohDiffHtml(s.name, ref)}</span> <span class="text-muted">(${esc(t('coherence.fiches', { count: s.count }))})</span>${(s.places || []).map(cohPlaceHtml).join('')}${cohFilesHtml(s)}</div>`;
 
   // Which way to merge: the suggested direction first (into the biggest series), the reverse
   // as a second button when there are only two — the biggest spelling isn't always the right one.
@@ -1821,13 +1910,16 @@
   function cohFindingHtml(f, i) {
     const detail = [];
     const actions = [];
+    let chipsHtml = null;
     let label = esc(f.label);
     const mono = (s) => `<span class="coh-mono">${esc(s)}</span>`;
     switch (f.rule) {
       case 'series_equivalent':
       case 'series_similar':
-        detail.push(esc(t('coherence.detail.' + f.rule)));
-        detail.push(f.series.map((s) => `${esc(s.name)} <span class="text-muted">(${esc(t('coherence.fiches', { count: s.count }))})</span>`).join(' · '));
+        // each name is shown with the characters that set it apart from the other highlighted (the first is compared with the second)
+        detail.push(f.series.map((sr, k) => cohSeriesBlock(sr, f.series[k === 0 ? 1 : 0].name)).join(''));
+        detail.push(`<span class="small">${esc(t('coherence.diff_label'))} ${[...new Set(f.series.slice(1).map((sr) => cohDiffKind(f.series[0].name, sr.name, f.rule)))].map((k) => esc(t('coherence.diff_' + k))).join(' · ')}</span>`);
+        if (typeof f.shared_folder === 'boolean') detail.push(`<span class="coh-tag">${esc(t(f.shared_folder ? 'coherence.tag_shared' : 'coherence.tag_distinct'))}</span>`);
         cohMergePairs(f).forEach((p) => actions.push(
           `<button type="button" class="btn btn-secondary btn-sm" data-coh="merge" data-idx="${i}" data-from="${Number(p.from.id)}" data-into="${Number(p.into.id)}">${esc(t('coherence.merge_btn', { from: p.from.name, into: p.into.name }))}</button>`
         ));
@@ -1838,13 +1930,18 @@
         break;
       case 'number_duplicate':
         detail.push(esc(t('coherence.detail.number_duplicate', { count: f.items_total })));
+        chipsHtml = f.items.map((it) => `<div class="coh-dup">${cohItemLink(it)}<div class="coh-mono">${esc(cohWhere(it))}</div></div>`).join('')
+          + (f.items_total > f.items.length ? `<div class="text-muted small">${esc(t('coherence.more_items', { count: f.items_total - f.items.length }))}</div>` : '');
         break;
       case 'number_title_mismatch':
         detail.push(esc(t('coherence.detail.number_title_mismatch', { title_numbers: f.data.title_numbers.join(', #'), issue_number: f.data.issue_number })));
         break;
-      case 'number_empty_text':
-        detail.push(esc(t('coherence.detail.number_empty_text', { value: f.data.value })));
+      case 'number_empty_text': {
+        const blank = String(f.data.value).trim() === '';
+        detail.push(esc(t(blank ? 'coherence.detail.number_empty_blank' : 'coherence.detail.number_empty_text', { value: f.data.value })));
+        if (blank) actions.push(`<button type="button" class="btn btn-secondary btn-sm" data-coh="fix-number" data-idx="${i}">${esc(t('coherence.fix_number'))}</button>`);
         break;
+      }
       case 'number_year_like':
         detail.push(esc(t('coherence.detail.number_year_like', { value: f.data.value })));
         break;
@@ -1879,6 +1976,9 @@
     let chips = '';
     if (COH_SINGLE_ITEM_RULES.includes(f.rule) && f.items.length === 1) {
       label = cohItemLink(f.items[0], label);
+      if (f.rule !== 'file_missing' && f.items[0].path) detail.push(mono(cohWhere(f.items[0])));
+    } else if (chipsHtml !== null) {
+      chips = chipsHtml;
     } else if (f.items.length) {
       const shown = f.items.slice(0, 5);
       const more = Math.max(0, f.items_total - shown.length);
@@ -1909,7 +2009,11 @@
     const bulk = coh.total > 0
       ? `<button type="button" class="btn btn-secondary btn-sm" data-coh="${coh.showDismissed ? 'restore-all' : 'dismiss-all'}">${esc(t(coh.showDismissed ? 'coherence.restore_all' : 'coherence.dismiss_all', { count: coh.total }))}</button>`
       : '';
-    const bar = `<div class="coh-results-bar"><label><input type="checkbox" id="cohShowDismissed"${coh.showDismissed ? ' checked' : ''} /> ${esc(t('coherence.show_dismissed'))}</label>${bulk}</div>`;
+    // "Fix all empty numbers" only when there is something it can fix (a blank among the loaded findings, or more not loaded yet)
+    const canFixAll = rule.id === 'number_empty_text' && !coh.showDismissed
+      && (coh.findings.some((x) => String(x.data.value).trim() === '') || coh.findings.length < coh.total);
+    const fixAll = canFixAll ? `<button type="button" class="btn btn-secondary btn-sm" data-coh="fix-numbers">${esc(t('coherence.fix_numbers_all'))}</button>` : '';
+    const bar = `<div class="coh-results-bar"><label><input type="checkbox" id="cohShowDismissed"${coh.showDismissed ? ' checked' : ''} /> ${esc(t('coherence.show_dismissed'))}</label><span class="coh-bulk">${fixAll}${bulk}</span></div>`;
     const list = coh.findings.length
       ? coh.findings.map((f, i) => cohFindingHtml(f, i)).join('')
       : `<p class="text-muted" style="margin-top:12px;">${esc(t('coherence.nothing'))}</p>`;
@@ -1943,6 +2047,15 @@
     try {
       if (action === 'more') { await loadCohFindings(false); return; }
 
+      if (action === 'fix-numbers') {
+        if (!confirm(t('coherence.confirm_fix_numbers', { scope: cohScope() }))) return;
+        const res = await api('POST', '/api/coherence/fix-numbers', coh.libraryId === '' ? {} : { library_id: Number(coh.libraryId) });
+        showToast(t('coherence.numbers_fixed', { count: res.fixed }));
+        await loadCohFindings(true);
+        refreshCohCounts();
+        return;
+      }
+
       if (action === 'dismiss-all' || action === 'restore-all') {
         const dismissing = action === 'dismiss-all';
         if (!confirm(t(dismissing ? 'coherence.confirm_dismiss_all' : 'coherence.confirm_restore_all', { count: coh.total, scope: cohScope() }))) return;
@@ -1960,6 +2073,9 @@
       if (action === 'dismiss' || action === 'restore') {
         await api('POST', `/api/coherence/${action}`, { rule: f.rule, keys: [f.key] });
         showToast(t(action === 'dismiss' ? 'coherence.dismissed_toast' : 'coherence.restored_toast'));
+      } else if (action === 'fix-number') {
+        await api('POST', '/api/coherence/fix-number', { item_id: f.items[0].id });
+        showToast(t('coherence.number_fixed'));
       } else if (action === 'apply') {
         const res = await api('POST', '/api/coherence/fix-title', { item_id: f.items[0].id });
         showToast(t(res.changed ? 'coherence.title_applied' : 'coherence.title_unchanged'));
@@ -2755,4 +2871,5 @@
   }
 
   renderUsersTab();
+  restoreFromHash();
 })();

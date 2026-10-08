@@ -228,6 +228,176 @@ final class Coherence
         return ['title' => $clean, 'changed' => true];
     }
 
+    /** How many of a series' items are listed under it in a finding. */
+    private const SERIES_SAMPLE = 8;
+
+    /** Whitespace that makes a "number" blank. ASCII only, like cleanTitle(). */
+    private const BLANK = " \t\r\n";
+
+    /**
+     * Turns ONE empty-text number into "no number". Recomputed here from what the database holds right now (the button only says
+     * which item). A number that is real text — "Hors-série" — is refused: that is not an empty string, and guessing what the
+     * admin meant would lose it.
+     * @return array{changed: bool}
+     */
+    public static function fixNumber(int $itemId): array
+    {
+        $rows = self::fetchAll('SELECT typeof(issue_number) AS t, issue_number AS v FROM items WHERE id = ?', [$itemId]);
+        if ($rows === []) {
+            throw new InvalidArgumentException('Fiche introuvable');
+        }
+        if ($rows[0]['t'] !== 'text') {
+            return ['changed' => false];
+        }
+        if (trim((string) $rows[0]['v'], self::BLANK) !== '') {
+            throw new InvalidArgumentException('Ce numéro (« ' . $rows[0]['v'] . " ») n'est pas un texte vide : corrige-le dans la fiche, ou ignore ce constat.");
+        }
+        self::pdo()->prepare("UPDATE items SET issue_number = NULL WHERE id = ? AND typeof(issue_number) = 'text'")->execute([$itemId]);
+        return ['changed' => true];
+    }
+
+    /** The same for every empty-text number (optionally one library); real text is left alone. @return int how many were fixed */
+    public static function fixNumbers(?int $libraryId = null): int
+    {
+        $sql = "UPDATE items SET issue_number = NULL WHERE typeof(issue_number) = 'text' AND TRIM(issue_number, ?) = ''";
+        $args = [self::BLANK];
+        if ($libraryId !== null) {
+            $sql .= ' AND library_id = ?';
+            $args[] = $libraryId;
+        }
+        $stmt = self::pdo()->prepare($sql);
+        $stmt->execute($args);
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Adds *where things are filed* to the findings of ONE page: the library name of every sampled item and, for each
+     * series, the libraries and folders its items live in — the folder they all share, how many folders there are, and
+     * whether the series of a finding have items in a common folder. That is what lets an admin tell a real split from
+     * two legitimately different series. Done per page, not for every finding, so a 5 000-finding list costs nothing
+     * until a page of it is shown.
+     * @param array<int, array<string, mixed>> $findings
+     * @return array<int, array<string, mixed>>
+     */
+    public static function enrich(array $findings): array
+    {
+        $libs = [];
+        foreach (self::fetchAll('SELECT id, name FROM libraries', []) as $l) {
+            $libs[(int) $l['id']] = (string) $l['name'];
+        }
+        $seriesIds = [];
+        foreach ($findings as $f) {
+            foreach ($f['series'] as $s) {
+                $seriesIds[(int) $s['id']] = true;
+            }
+        }
+        $byDir = []; // series id => library id => directory => number of items
+        foreach (array_chunk(array_keys($seriesIds), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            foreach (self::fetchAll("SELECT series_id, library_id, path FROM items WHERE series_id IN ($in)", $chunk) as $r) {
+                $dir = self::dirOf((string) $r['path']);
+                $sid = (int) $r['series_id'];
+                $lib = (int) $r['library_id'];
+                $byDir[$sid][$lib][$dir] = ($byDir[$sid][$lib][$dir] ?? 0) + 1;
+            }
+        }
+        // The first few items of each series (numbered ones first): enough to recognise WHICH files carry a given name — the question
+        // an admin asks of "two series with almost the same name". A window function keeps it bounded however big the series is.
+        $sample = [];
+        foreach (array_chunk(array_keys($seriesIds), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $rows = self::fetchAll(
+                "SELECT id, series_id, title, path, issue_number FROM (
+                    SELECT id, series_id, title, path, issue_number,
+                           ROW_NUMBER() OVER (PARTITION BY series_id ORDER BY (issue_number IS NULL), issue_number, title, id) AS rn
+                    FROM items WHERE series_id IN ($in)
+                 ) WHERE rn <= " . self::SERIES_SAMPLE . ' ORDER BY series_id, rn',
+                $chunk
+            );
+            foreach ($rows as $r) {
+                $sample[(int) $r['series_id']][] = [
+                    'id' => (int) $r['id'], 'title' => (string) $r['title'], 'file' => basename((string) $r['path']),
+                    'issue_number' => is_numeric($r['issue_number']) ? (float) $r['issue_number'] : null,
+                ];
+            }
+        }
+        foreach ($findings as &$f) {
+            foreach ($f['items'] as &$it) {
+                $it['library'] = isset($it['library_id']) ? ($libs[(int) $it['library_id']] ?? null) : null;
+            }
+            unset($it);
+            $seen = []; // "library|directory" => the series that have items there
+            foreach ($f['series'] as &$s) {
+                $places = $byDir[(int) $s['id']] ?? [];
+                foreach ($places as $lib => $dirs) {
+                    foreach ($dirs as $dir => $n) {
+                        $seen[$lib . '|' . $dir][(int) $s['id']] = true;
+                    }
+                }
+                $s['places'] = self::summarizePlaces($places, $libs);
+                $s['sample'] = $sample[(int) $s['id']] ?? [];
+                $s['sample_more'] = max(0, (int) $s['count'] - count($s['sample']));
+            }
+            unset($s);
+            if (count($f['series']) >= 2) {
+                $f['shared_folder'] = array_filter($seen, fn($ids) => count($ids) >= 2) !== [];
+            }
+        }
+        unset($f);
+        return $findings;
+    }
+
+    private static function dirOf(string $path): string
+    {
+        $d = dirname($path);
+        return ($d === '.' || $d === '/') ? '' : $d;
+    }
+
+    /**
+     * @param array<int, array<string|int, int>> $byLib library id => directory => item count
+     * @param array<int, string> $libs
+     * @return array<int, array<string, mixed>> most populated library first
+     */
+    private static function summarizePlaces(array $byLib, array $libs): array
+    {
+        $out = [];
+        foreach ($byLib as $lib => $dirs) {
+            arsort($dirs); // most items first (stable: ties keep their order)
+            $list = [];
+            foreach (array_slice($dirs, 0, 30, true) as $dir => $n) {
+                $list[] = ['folder' => (string) $dir, 'count' => (int) $n];
+            }
+            $out[] = [
+                'library_id' => (int) $lib, 'library' => $libs[(int) $lib] ?? null, 'count' => array_sum($dirs),
+                'common' => self::commonDir(array_map('strval', array_keys($dirs))), 'folders_total' => count($dirs), 'folders' => $list,
+            ];
+        }
+        usort($out, fn($a, $b) => $b['count'] <=> $a['count']);
+        return $out;
+    }
+
+    /** The longest run of leading folders that all the given directories share. @param array<int, string> $dirs */
+    private static function commonDir(array $dirs): string
+    {
+        if ($dirs === []) {
+            return '';
+        }
+        $common = explode('/', $dirs[0]);
+        foreach ($dirs as $d) {
+            $parts = explode('/', $d);
+            $n = 0;
+            $max = min(count($common), count($parts));
+            while ($n < $max && $common[$n] === $parts[$n]) {
+                $n++;
+            }
+            $common = array_slice($common, 0, $n);
+            if ($common === []) {
+                break;
+            }
+        }
+        return implode('/', $common);
+    }
+
     /**
      * Name comparison key: accents, case, punctuation and a leading/trailing
      * article ("The Twelve" / "Twelve (The)") don't matter; digits do —
