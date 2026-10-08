@@ -1,15 +1,17 @@
-services:
+  # Codex - service a mettre dans ton compose.yml (chemins a adapter). Reconstitue d'apres ton compose.
+  # IMPORTANT : docker/000-default.conf et docker/uploads.ini doivent EXISTER (fichiers) AVANT `up`.
+  # S'ils manquent, Docker cree a leur place des DOSSIERS vides, et Apache tourne avec sa config par defaut.
   codex:
     image: php:8.2-apache
+    container_name: 8215-codex
     ports:
-      - "8090:80"
+      - 8215:80
     volumes:
-      - ./public:/var/www/html/public:ro
-      - ./public/assets:/var/www/html/public/assets
-      - ./src:/var/www/html/src:ro
-      - ./data:/var/www/html/data
-      - ./libraries:/var/www/html/libraries:ro
- 
+      - ./docker/codex/public:/var/www/html/public:ro
+      - ./docker/codex/public/assets:/var/www/html/public/assets
+      - ./docker/codex/src:/var/www/html/src:ro
+      - ./docker/codex/data:/var/www/html/data
+
       # External library sources: mount each one directly as a named
       # subfolder of libraries/, rather than a symlink inside ./libraries
       # pointing at a host path — a symlink like that is invisible from
@@ -18,8 +20,8 @@ services:
       # want it to appear as under libraries/ in the admin's path picker:
       - ./docker/comics:/var/www/html/libraries/comics:ro
 
-      - ./docker/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
-      - ./docker/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./docker/codex/docker/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
+      - ./docker/codex/docker/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
     command: >
       bash -c "
         mkdir -p /var/www/html/data/logs;

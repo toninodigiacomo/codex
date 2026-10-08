@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bibliothèque — Codex</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="stylesheet" href="css/library.css" />
+</head>
+<body>
+
+<div class="app-shell">
+  <nav class="nav topbar">
+    <span class="nav-brand">Codex</span>
+    <div class="search-box">
+      <input class="input" type="search" id="searchInput" placeholder="Rechercher un titre, un auteur..." />
+    </div>
+    <div class="seg" id="typeTabs">
+      <label class="seg-opt"><input type="radio" name="type" value="" checked /><span>Tous</span></label>
+      <label class="seg-opt"><input type="radio" name="type" value="comic" /><span>BD</span></label>
+      <label class="seg-opt"><input type="radio" name="type" value="ebook" /><span>Ebooks</span></label>
+      <label class="seg-opt"><input type="radio" name="type" value="magazine" /><span>Magazines</span></label>
+    </div>
+  </nav>
+
+  <div class="app-body">
+    <aside class="sidebar">
+      <div class="side-section">
+        <h6>Bibliothèques</h6>
+        <ul class="side-list" id="libraryList"></ul>
+      </div>
+      <div class="side-section">
+        <h6>Séries</h6>
+        <ul class="side-list" id="seriesList"></ul>
+      </div>
+      <div class="side-section">
+        <h6>Tags</h6>
+        <ul class="side-list tag-list" id="tagList"></ul>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <div class="main-toolbar">
+        <div class="active-filters" id="activeFilters"></div>
+        <select class="input" id="sortSelect" style="width:auto;">
+          <option value="title:ASC">Titre (A→Z)</option>
+          <option value="title:DESC">Titre (Z→A)</option>
+          <option value="added_at:DESC">Ajout récent</option>
+          <option value="added_at:ASC">Ajout ancien</option>
+        </select>
+      </div>
+
+      <p class="text-muted" id="resultCount"></p>
+
+      <div class="item-grid" id="itemGrid"></div>
+      <p class="text-muted" id="emptyState" hidden>Aucun résultat. La bibliothèque est-elle déjà indexée ?</p>
+    </main>
+  </div>
+</div>
+
+<script src="js/library.js"></script>
+
+</body>
+</html>
