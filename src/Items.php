@@ -307,7 +307,10 @@ final class Items
             $params[':fav_user'] = $filters['favorites_for_user'];
         }
         if (!empty($filters['query'])) {
-            $where[] = '(items.title LIKE :q OR items.publisher LIKE :q)';
+            $seriesSql = !empty($filters['query_in_series'])
+                ? ' OR items.series_id IN (SELECT id FROM series WHERE name LIKE :q)'
+                : '';
+            $where[] = '(items.title LIKE :q OR items.publisher LIKE :q' . $seriesSql . ')';
             $params[':q'] = '%' . $filters['query'] . '%';
         }
         if (isset($filters['ids']) && is_array($filters['ids'])) {

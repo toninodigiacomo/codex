@@ -28,8 +28,6 @@ require_once __DIR__ . '/../../src/CbzEditor.php';
 require_once __DIR__ . '/../../src/LibraryGroups.php';
 require_once __DIR__ . '/../../src/AppLog.php';
 require_once __DIR__ . '/../../src/LibraryJobs.php';
-require_once __DIR__ . '/../../src/Coherence.php';
-require_once __DIR__ . '/../../src/License.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -559,6 +557,8 @@ try {
                 'type' => $_GET['type'] ?? null,
                 'library_id' => isset($_GET['library_id']) ? (int) $_GET['library_id'] : null,
                 'query' => $_GET['q'] ?? null,
+                // Objets tab only: the search box also matches the series name, to find every fiche of a series.
+                'query_in_series' => isset($_GET['q']) && $_GET['q'] !== '' ? true : null,
             ], fn($v) => $v !== null && $v !== '');
             // Same path/exact mechanism as GET /api/items uses for the
             // reader-facing éditeur nav — the tree browser's leaf level
@@ -1517,105 +1517,6 @@ try {
                 $matches = $pattern !== '' && @preg_match($pattern, $filename) === 1;
                 respond(200, ['matches' => $matches]);
             }
-            respond(405, ['error' => 'Méthode non autorisée']);
-
-        case 'license':
-            // Codex Premium licence (src/License.php). Admin only; the key itself is never sent back.
-            Auth::requireAdminApi();
-            if ($method === 'GET' && $rawSecondSegment === null) {
-                respond(200, License::status());
-            }
-            if ($method === 'GET' && $rawSecondSegment === 'request') {
-                // Available before activation — it is how an admin asks for a key in the first place
-                respond(200, ['request' => License::requestString(), 'installation_id' => License::displayId(License::installationId())]);
-            }
-            if ($method === 'POST' && $rawSecondSegment === null) {
-                respond(200, License::activate((string) (bodyJson()['key'] ?? '')));
-            }
-            respond(405, ['error' => 'Méthode non autorisée']);
-
-        case 'coherence':
-            // The Cohérence tab (see src/Coherence.php). Everything here only reads,
-            // except two things: ignore/restore, which just remember which findings
-            // the admin already looked at, and merge-series — the one explicit action
-            // a finding can lead to, and one the admin triggers knowingly.
-            Auth::requireAdminApi();
-            // Part of the IA tab, so part of Premium — enforced here, not just by hiding the tab.
-            if (!License::isActive()) {
-                respond(403, ['error' => 'Fonction réservée à Codex Premium', 'code' => 'premium_required']);
-            }
-
-            if ($method === 'GET' && $rawSecondSegment === null) {
-                respond(200, ['rules' => Coherence::rules(), 'counts' => Coherence::summary()]);
-            }
-
-            if ($method === 'GET' && $rawSecondSegment !== null) {
-                $rule = (string) $rawSecondSegment;
-                if (!Coherence::isRule($rule)) {
-                    respond(404, ['error' => 'Règle inconnue']);
-                }
-                $libraryId = isset($_GET['library_id']) && $_GET['library_id'] !== '' ? (int) $_GET['library_id'] : null;
-                $offset = max(0, (int) ($_GET['offset'] ?? 0));
-                // Rules that walk the disk are recomputed on every call, so they hand
-                // everything over at once (capped) rather than being paged.
-                $limit = min(Coherence::needsDisk($rule) ? 1000 : 200, max(1, (int) ($_GET['limit'] ?? 50)));
-                $findings = Coherence::findings($rule, $libraryId, ($_GET['dismissed'] ?? '') === '1');
-                respond(200, [
-                    'rule' => $rule,
-                    'total' => count($findings),
-                    'offset' => $offset,
-                    'limit' => $limit,
-                    'findings' => Coherence::enrich(array_slice($findings, $offset, $limit)),
-                ]);
-            }
-
-            if ($method === 'POST' && ($rawSecondSegment === 'dismiss' || $rawSecondSegment === 'restore')) {
-                $body = bodyJson();
-                $rule = (string) ($body['rule'] ?? '');
-                if (!Coherence::isRule($rule)) {
-                    respond(400, ['error' => 'Règle inconnue']);
-                }
-                $restoring = $rawSecondSegment === 'restore';
-                if (!empty($body['all'])) {
-                    // Everything currently listed for this rule (and library, if one is given)
-                    $libraryId = isset($body['library_id']) && $body['library_id'] !== '' ? (int) $body['library_id'] : null;
-                    $keys = array_column(Coherence::findings($rule, $libraryId, $restoring), 'key');
-                } else {
-                    $keys = array_map('strval', is_array($body['keys'] ?? null) ? $body['keys'] : []);
-                }
-                $n = $restoring ? Coherence::restore($rule, $keys) : Coherence::dismiss($rule, $keys);
-                respond(200, [$restoring ? 'restored' : 'dismissed' => $n]);
-            }
-
-            if ($method === 'POST' && $rawSecondSegment === 'merge-series') {
-                $body = bodyJson();
-                $fromId = (int) ($body['from_id'] ?? 0);
-                $intoId = (int) ($body['into_id'] ?? 0);
-                $result = Series::merge($fromId, $intoId);
-                respond(200, ['moved' => $result['moved'], 'series' => Series::find($intoId)]);
-            }
-
-            if ($method === 'POST' && $rawSecondSegment === 'fix-title') {
-                $result = Coherence::fixTitle((int) (bodyJson()['item_id'] ?? 0));
-                respond(200, $result);
-            }
-
-            if ($method === 'POST' && $rawSecondSegment === 'delete-series') {
-                // Not /api/series/{id}: that route is for readers and refuses admins — and
-                // this one only ever deletes a series nothing points at.
-                Series::deleteIfEmpty((int) (bodyJson()['id'] ?? 0));
-                respond(200, ['deleted' => true]);
-            }
-
-            if ($method === 'POST' && $rawSecondSegment === 'fix-number') {
-                respond(200, Coherence::fixNumber((int) (bodyJson()['item_id'] ?? 0)));
-            }
-
-            if ($method === 'POST' && $rawSecondSegment === 'fix-numbers') {
-                $lib = bodyJson()['library_id'] ?? null;
-                respond(200, ['fixed' => Coherence::fixNumbers($lib === null || $lib === '' ? null : (int) $lib)]);
-            }
-
             respond(405, ['error' => 'Méthode non autorisée']);
 
         default:
